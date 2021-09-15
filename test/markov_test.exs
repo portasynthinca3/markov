@@ -68,4 +68,21 @@ defmodule MarkovTest do
     total = world_cnt + elixir_cnt
     assert abs(world_cnt - elixir_cnt) <= (total * 0.05)
   end
+
+  test "probability test - custom tokens" do
+    chain = Markov.train(%Markov{}, [:a, :b]) |> Markov.train([:a, :c])
+
+    # count the number of times :a and :b come up in 1000 rounds
+    {a_cnt, b_cnt} = Enum.reduce(1..1000, {0, 0}, fn _, {a, b} ->
+      case Markov.generate_tokens(chain) do
+        [:a, :b] -> {a + 1, b}
+        [:a, :c] -> {a, b + 1}
+        _ -> assert false
+      end
+    end)
+
+    # assert max. deviation of 5%
+    total = a_cnt + b_cnt
+    assert abs(a_cnt - b_cnt) <= (total * 0.05)
+  end
 end

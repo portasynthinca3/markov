@@ -7,7 +7,7 @@ defmodule Markov do
   defstruct links: %{[:start, :start] => %{end: 1}, end: %{}}
 
   @doc """
-  Trains `chain` using `text`.
+  Trains `chain` using `text` or a list of `tokens`.
 
   Returns the modified chain.
 
@@ -17,11 +17,19 @@ defmodule Markov do
           |> Markov.train("example string number two")
           |> Markov.train("hello, Elixir!")
           |> Markov.train("fourth string")
+
+      chain = %Markov{}
+          |> Markov.train(["individual tokens", :can_be, 'arbitrary terms'])
   """
-  @spec train(%Markov{}, String.t()) :: %Markov{}
+  @spec train(%Markov{}, String.t() | [any()]) :: %Markov{}
   def train(%Markov{}=chain, text) when is_binary(text) do
     tokens = String.split(text)
-    tokens = [:start, :start] ++ tokens ++ [:end] # add start and end tokens
+    train(chain, tokens)
+  end
+
+  def train(%Markov{}=chain, tokens) when is_list(tokens) do
+    # add start and end tokens
+    tokens = [:start, :start] ++ tokens ++ [:end]
 
     # adjust link weights
     new_links = Enum.reduce Markov.ListUtil.ttuples(tokens), chain.links, fn {first, second, third}, acc ->
@@ -56,6 +64,9 @@ defmodule Markov do
 
       iex> %Markov{} |> Markov.train("1 2") |> Markov.next_state([:start, :start])
       "1"
+
+      iex> %Markov{} |> Markov.train([:a, :b, :c]) |> Markov.next_state([:a, :b])
+      :c
   """
   @spec next_state(%Markov{}, any()) :: any()
   def next_state(%Markov{}=chain, current) do
@@ -72,10 +83,36 @@ defmodule Markov do
   end
 
   @doc """
-  Generates a string of text using the `chain`
+  Generates a list of tokens using the `chain`
 
   Optionally prepends `acc` to it and assumes the previous
   two states were `[state1, state2]=state`.
+
+  Returns the generated list.
+
+  ## Example
+      iex> %Markov{} |> Markov.train([:a, :b, :c]) |> Markov.generate_tokens()
+      [:a, :b, :c]
+
+      iex> %Markov{} |> Markov.train([:a, :b, :c]) |>
+      ...> Markov.generate_tokens([], [:a, :b])
+      [:c]
+  """
+  @spec generate_tokens(%Markov{}, acc :: [any()], [any()]) :: String.t()
+  def generate_tokens(%Markov{}=chain, acc \\ [], state \\ [:start, :start]) do
+    # iterate through states until :end
+    new_state = next_state(chain, state)
+    unless new_state == :end do
+      generate_tokens(chain, acc ++ [new_state], [state |> Enum.at(1), new_state])
+    else
+      acc
+    end
+  end
+
+  @doc """
+  Generates a string of text using the `chain`
+
+  Optionally assumes the previous two states were `[state1, state2]=state`.
 
   Returns the generated text.
 
@@ -84,24 +121,12 @@ defmodule Markov do
       "hello, world!"
 
       iex> %Markov{} |> Markov.train("hello, world!") |>
-      ...> Markov.generate_text("", [:start, "hello,"])
+      ...> Markov.generate_text([:start, "hello,"])
       "world!"
   """
-  @spec generate_text(%Markov{}, acc :: String.t(), any()) :: String.t()
-  def generate_text(%Markov{}=chain, acc \\ "", state \\ [:start, :start]) do
-    # iterate through states until :end
-    new_state = next_state(chain, state)
-    unless new_state == :end do
-      acc = acc <> new_state <> " "
-      generate_text(chain, acc, [Enum.at(state, 1), new_state])
-    else
-      str = String.trim(acc)
-      if str == "" do
-        ":x: **I haven't seen any messages yet**"
-      else
-        str
-      end
-    end
+  @spec generate_text(%Markov{}, [any()]) :: String.t()
+  def generate_text(%Markov{}=chain, state \\ [:start, :start]) do
+    generate_tokens(chain, [], state) |> Enum.join(" ")
   end
 
   @spec probabilistic_select(integer(), list({any(), integer()}), integer(), integer()) :: any()
