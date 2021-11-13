@@ -1,6 +1,9 @@
 # Markov
 Text generation library based on second-order Markov chains
 
+![Hex.pm](https://img.shields.io/hexpm/v/markov)
+![Hex.pm](https://img.shields.io/hexpm/dd/markov)
+
 ## Demo
 ```
 $ iex -S mix
@@ -31,7 +34,7 @@ ANTIPHOLUS
 In `mix.exs`:
 ```elixir
 defp deps do
-  [{:markov, "~> 0.1"}]
+  [{:markov, "~> 1.1"}]
 end
 ```
 
