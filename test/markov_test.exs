@@ -7,8 +7,7 @@ defmodule MarkovTest do
       links: %{
         [:start, :start] => %{"hello," => 1},
         [:start, "hello,"] => %{"world!" => 1},
-        ["hello,", "world!"] => %{end: 1},
-        :end => %{}
+        ["hello,", "world!"] => %{end: 1}
       }
     }
   end
@@ -19,8 +18,7 @@ defmodule MarkovTest do
       links: %{
         [:start, :start] => %{"hello," => 2},
         [:start, "hello,"] => %{"world!" => 2},
-        ["hello,", "world!"] => %{end: 2},
-        :end => %{}
+        ["hello,", "world!"] => %{end: 2}
       }
     }
   end
@@ -29,7 +27,6 @@ defmodule MarkovTest do
     assert Markov.train(%Markov{}, "hello, world!")
         |> Markov.train("hello, World!") == %Markov{
       links: %{
-        :end => %{},
         [:start, :start] => %{"hello," => 2},
         [:start, "hello,"] => %{"World!" => 1, "world!" => 1},
         ["hello,", "World!"] => %{end: 1},
@@ -90,6 +87,31 @@ defmodule MarkovTest do
     chain = %Markov{sanitize_tokens: true}
           |> Markov.train("a b c")
           |> Markov.train("a B d")
+
+    # count the number of times all four variations come up in 1000 rounds
+    {v1, v2, v3, v4} = Enum.reduce(1..1000, {0, 0, 0, 0}, fn _, {v1, v2, v3, v4} ->
+      case Markov.generate_text(chain) do
+        "a b c" -> {v1 + 1, v2, v3, v4}
+        "a b d" -> {v1, v2 + 1, v3, v4}
+        "a B c" -> {v1, v2, v3 + 1, v4}
+        "a B d" -> {v1, v2, v3, v4 + 1}
+        _ -> assert false
+      end
+    end)
+
+    # assert max. deviation of 7%
+    total = v1 + v2 + v3 + v4
+    assert abs(v1 - (total / 4)) <= (total * 0.07)
+    assert abs(v2 - (total / 4)) <= (total * 0.07)
+    assert abs(v3 - (total / 4)) <= (total * 0.07)
+    assert abs(v4 - (total / 4)) <= (total * 0.07)
+  end
+
+  test "sanitization mode enabled after the fact" do
+    chain = %Markov{}
+          |> Markov.train("a b c")
+          |> Markov.train("a B d")
+          |> Markov.enable_token_sanitization()
 
     # count the number of times all four variations come up in 1000 rounds
     {v1, v2, v3, v4} = Enum.reduce(1..1000, {0, 0, 0, 0}, fn _, {v1, v2, v3, v4} ->

@@ -4,7 +4,7 @@ defmodule Markov do
   Next token prediction uses two previous tokens.
   """
 
-  defstruct links: %{[:start, :start] => %{end: 1}, end: %{}},
+  defstruct links: %{[:start, :start] => %{end: 1}},
             sanitize_tokens: false
 
   # Conditionally sanitizes a token list
@@ -58,6 +58,38 @@ defmodule Markov do
     chain = %{chain | links: new_links}
 
     chain
+  end
+
+  @doc """
+  Removes a `token` from all generation paths `chain` could produce.
+
+  Returns the modifier chain
+
+  ## Example
+      iex> %Markov{} |>
+      ...> Markov.train("a b c") |>
+      ...> Markov.forget_token("b") |>
+      ...> Markov.generate_text()
+      "a"
+  """
+  @spec forget_token(%Markov{}, any()) :: %Markov{}
+  def forget_token(%Markov{}=chain, token) do
+    # sanitize the token
+    token = if chain.sanitize_tokens do
+      token |> Markov.TextUtil.sanitize_token
+    else token end
+    # remove links that point to the token
+    %{chain | links: chain.links |> Enum.map(fn
+      {[_, _]=k, v} ->
+        {k, Enum.filter(v, fn {k, _} -> k != token end) |> Enum.into(%{})}
+      {k, v} -> {k, v}
+    end) |> Enum.into(%{})
+    # terminate states that point nowhere
+    |> Enum.map(fn
+      {k, %{}=map} when map_size(map) == 0 ->
+        {k, %{end: 1}}
+      {k, v} -> {k, v}
+    end) |> Enum.into(%{})}
   end
 
   @doc """
@@ -147,5 +179,44 @@ defmodule Markov do
     else
       probabilistic_select(number, tail, sum, acc + add)
     end
+  end
+
+  @doc """
+  Enables token sanitization on a `chain`.
+  When this mode is enabled, the chain doesn't understand the difference similar textual tokens.
+  This mode can't be disabled once it has been enabled.
+
+  Returns the modified chain.
+  """
+  @spec enable_token_sanitization(%Markov{}) :: %Markov{}
+  def enable_token_sanitization(%Markov{}=chain) do
+    sanitize = fn t -> t |> Enum.map(&Markov.TextUtil.sanitize_token/1) end
+
+    find_similar_states = fn [_,_]=state ->
+      state = state |> sanitize.()
+      chain.links |> Map.keys |> Enum.filter(fn s ->
+        s |> sanitize.() == state
+      end)
+    end
+
+    combine_states = fn states ->
+      states |> Enum.reduce(%{}, fn state, acc ->
+        Map.merge(acc, state, fn _, v1, v2 -> v1 + v2 end)
+      end)
+    end
+
+    {new_links, _} = chain.links |> Map.keys |> Enum.reduce({%{}, []} , fn k, {map, ignore} ->
+      sanitized = sanitize.(k)
+      unless sanitized in ignore do
+        similar = find_similar_states.(k) # also includes this one
+        combined = similar |> Enum.map(fn k -> Map.get(chain.links, k) end) |> combine_states.()
+        map = map |> Map.put(sanitized, combined)
+        {map, ignore ++ [sanitized]}
+      else
+        {map, ignore}
+      end
+    end)
+
+    %{chain | links: new_links, sanitize_tokens: true}
   end
 end

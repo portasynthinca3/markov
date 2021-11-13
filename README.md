@@ -1,5 +1,5 @@
 # Markov
-Markov-chain-based text generation library
+Text generation library based on second-order Markov chains
 
 ## Demo
 ```
@@ -38,7 +38,7 @@ end
 ## API
 
 ### `train/2`
-Trains the chain using provided text
+Trains the chain using provided text.
 
 **Example**:
 ```elixir
@@ -67,7 +67,7 @@ iex> %Markov{} |>
 ```
 
 ### `next_state/3`
-Predicts the next state from two last states
+Predicts the next state from two last states.
 
 **Examples**:
 ```elixir
@@ -81,3 +81,36 @@ iex> %Markov{} |>
 ...> Markov.next_state([:start, :start])
 "1"
 ```
+
+### `forget_token/2`
+Removes a token from the chain.
+
+**Examples**:
+```elixir
+iex> %Markov{} |>
+...> Markov.train("a b c") |>
+...> Markov.forget_token("b") |>
+...> Markov.generate_text()
+"a"
+```
+
+### Sanitization mode
+Ignores leading and trailing non-word characters, as well as the case, in textual tokens.
+
+**Example**:
+```elixir
+iex> chain = %Markov{sanitize_tokens: true} |>
+...> Markov.train("hello, Elixir world") |>
+...> Markov.train("hello Markov chains")
+%Markov{
+...
+}
+iex> chain |> Markov.generate_text()
+"hello, Markov chains"
+iex> chain |> Markov.generate_text()
+"hello Elixir world"
+iex> chain |> Markov.generate_text()
+```
+
+### `enable_token_sanitization/1`
+Enables token sanitization on a chain. This mode can't be disabled once it has been enabled.
