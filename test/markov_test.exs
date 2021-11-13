@@ -52,7 +52,7 @@ defmodule MarkovTest do
     assert Markov.train(%Markov{}, "hello, world!") |> Markov.generate_text() == "hello, world!"
   end
 
-  test "probability test" do
+  test "probability" do
     chain = Markov.train(%Markov{}, "hello, world!") |> Markov.train("hello, Elixir!")
 
     # count the number of times "world" and "Elixir" come up in 1000 rounds
@@ -69,7 +69,7 @@ defmodule MarkovTest do
     assert abs(world_cnt - elixir_cnt) <= (total * 0.05)
   end
 
-  test "probability test - custom tokens" do
+  test "probability - custom tokens" do
     chain = Markov.train(%Markov{}, [:a, :b]) |> Markov.train([:a, :c])
 
     # count the number of times :a and :b come up in 1000 rounds
@@ -81,8 +81,32 @@ defmodule MarkovTest do
       end
     end)
 
-    # assert max. deviation of 5%
+    # assert max. deviation of 7%
     total = a_cnt + b_cnt
-    assert abs(a_cnt - b_cnt) <= (total * 0.05)
+    assert abs(a_cnt - b_cnt) <= (total * 0.07)
+  end
+
+  test "sanitization mode" do
+    chain = %Markov{sanitize_tokens: true}
+          |> Markov.train("a b c")
+          |> Markov.train("a B d")
+
+    # count the number of times all four variations come up in 1000 rounds
+    {v1, v2, v3, v4} = Enum.reduce(1..1000, {0, 0, 0, 0}, fn _, {v1, v2, v3, v4} ->
+      case Markov.generate_text(chain) do
+        "a b c" -> {v1 + 1, v2, v3, v4}
+        "a b d" -> {v1, v2 + 1, v3, v4}
+        "a B c" -> {v1, v2, v3 + 1, v4}
+        "a B d" -> {v1, v2, v3, v4 + 1}
+        _ -> assert false
+      end
+    end)
+
+    # assert max. deviation of 7%
+    total = v1 + v2 + v3 + v4
+    assert abs(v1 - (total / 4)) <= (total * 0.07)
+    assert abs(v2 - (total / 4)) <= (total * 0.07)
+    assert abs(v3 - (total / 4)) <= (total * 0.07)
+    assert abs(v4 - (total / 4)) <= (total * 0.07)
   end
 end

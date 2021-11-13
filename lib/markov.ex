@@ -4,7 +4,16 @@ defmodule Markov do
   Next token prediction uses two previous tokens.
   """
 
-  defstruct links: %{[:start, :start] => %{end: 1}, end: %{}}
+  defstruct links: %{[:start, :start] => %{end: 1}, end: %{}},
+            sanitize_tokens: false
+
+  # Conditionally sanitizes a token list
+  @spec cond_sanitize_tokens([any()], %Markov{}) :: [any()]
+  defp cond_sanitize_tokens(tokens, chain) do
+    if chain.sanitize_tokens do
+      tokens |> Enum.map(&Markov.TextUtil.sanitize_token/1)
+    else tokens end
+  end
 
   @doc """
   Trains `chain` using `text` or a list of `tokens`.
@@ -33,7 +42,7 @@ defmodule Markov do
 
     # adjust link weights
     new_links = Enum.reduce Markov.ListUtil.ttuples(tokens), chain.links, fn {first, second, third}, acc ->
-      from = [first, second]
+      from = [first, second] |> cond_sanitize_tokens(chain)
       to = third
       links_from = acc[from]
       links_from = if links_from == nil do %{} else links_from end
@@ -70,6 +79,8 @@ defmodule Markov do
   """
   @spec next_state(%Markov{}, any()) :: any()
   def next_state(%Markov{}=chain, current) do
+    # sanitize state
+    current = current |> cond_sanitize_tokens(chain)
     # get links from current state
     # (enforce constant order by converting to proplist)
     links = chain.links[current] |> Enum.into([])
