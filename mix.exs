@@ -4,7 +4,7 @@ defmodule Markov.MixProject do
   def project do
     [
       app: :markov,
-      version: "1.1.0",
+      version: "1.2.0",
       elixir: "~> 1.12",
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
@@ -16,7 +16,7 @@ defmodule Markov.MixProject do
 
   defp description do
     """
-    Markov-chain-based text generation library
+    Text generation library based on second-order Markov chains
     """
   end
 

@@ -4,37 +4,11 @@ Text generation library based on second-order Markov chains
 ![Hex.pm](https://img.shields.io/hexpm/v/markov)
 ![Hex.pm](https://img.shields.io/hexpm/dd/markov)
 
-## Demo
-```
-$ iex -S mix
-Erlang/OTP 22 [erts-10.4.4] [source] [64-bit] [smp:4:4] [ds:4:4:10] [async-threads:1] [hipe]
-
-Compiling 2 files (.ex)
-Generated markov app
-Interactive Elixir (1.12.2) - press Ctrl+C to exit (type h() ENTER for help)
-iex(1)> Markov.Demo.generate_shakespeare
-Since that my two ears
-thee, hind!
-deliver you.
-DROMIO OF SYRACUSE
-Pleaseth you walk in to see their gossiping?
-For, ere the weary sun set in my shape.
-In Ephesus I am advised what I think.
-Exeunt
-DROMIO OF SYRACUSE
-Give her this key, and tell her, in the teeth?
-A back-friend, a shoulder-clapper, one that
-Neither: he took this place for sanctuary,
-BALTHAZAR
-ANTIPHOLUS
-...... (100 lines in total)
-```
-
 ## Usage
 In `mix.exs`:
 ```elixir
 defp deps do
-  [{:markov, "~> 1.1"}]
+  [{:markov, "~> 1.2"}]
 end
 ```
 
@@ -112,8 +86,24 @@ iex> chain |> Markov.generate_text()
 "hello, Markov chains"
 iex> chain |> Markov.generate_text()
 "hello Elixir world"
-iex> chain |> Markov.generate_text()
 ```
 
 ### `enable_token_sanitization/1`
 Enables token sanitization on a chain. This mode can't be disabled once it has been enabled.
+
+### Shift mode
+In this mode, the generation routine dampens the rate of more popular tokens and gives less common generation paths more chance to get used. Enabling this mode may help if you feel like this library is repeating original data verbatim or almost verbatim. Output may make less sense with this mode turned on.
+
+**Example**:
+```elixir
+iex> chain = %Markov{shift: true} |>
+...> Markov.train("1 2 3 4 5") |>
+...> Markov.train("1 2 3 4 5") |>
+...> Markov.train("1 2 3 4 5") |>
+...> Markov.train("1 3 4 5") |>
+%Markov{
+...
+}
+iex> chain |> Markov.generate_text()
+"1 3 4 5"
+```

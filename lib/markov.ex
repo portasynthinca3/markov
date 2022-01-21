@@ -5,7 +5,8 @@ defmodule Markov do
   """
 
   defstruct links: %{[:start, :start] => %{end: 1}},
-            sanitize_tokens: false
+            sanitize_tokens: false,
+            shift: false
 
   # Conditionally sanitizes a token list
   @spec cond_sanitize_tokens([any()], %Markov{}) :: [any()]
@@ -13,6 +14,52 @@ defmodule Markov do
     if chain.sanitize_tokens do
       tokens |> Enum.map(&Markov.TextUtil.sanitize_token/1)
     else tokens end
+  end
+
+  # Conditionally shifts probabilities
+  @spec cond_shift_probs(%{[any()] => any()}, %Markov{}) :: %{[any()] => any()}
+  def cond_shift_probs(links, %Markov{shift: shift}) do
+    if shift and map_size(links) >= 2 do
+      # sort links by their probability
+      links = links
+        |> Enum.into([])
+        |> Enum.sort(fn {_, foo}, {_, bar} -> foo > bar end)
+
+      # choose the peak
+      peak = max(1, length(links) * 0.25) |> floor()
+      {_, peak_prob} = Enum.at(links, peak)
+      # determine by how much the first most probable path
+      # is more likely than the peak
+      {_, first_prob} = Enum.at(links, 0)
+      ratio = first_prob / peak_prob
+
+      # https://www.desmos.com/calculator/nkomslcoqu
+      # fun fact: this is literally the first time ever in my
+      # 8 year long programming career that i actually had to
+      # use "real" maths
+
+      exp = 1.7
+      links = for i <- 0 .. length(links)-1 do
+        {k, _} = Enum.at(links, i)
+        {k, v} = cond do
+          # massively dampen probabilities before the peak
+          i < peak ->
+            offset = (first_prob / (ratio ** exp))
+            coeff = (peak_prob - (peak_prob * ratio / (ratio ** exp + 1))) / (peak ** 2)
+            {k, (coeff * (i ** exp)) + offset}
+          # leave the peak as is
+          i == peak ->
+            {k, peak_prob}
+          # gradual fall-off
+          i > peak ->
+            {k, peak_prob / (i - 1)}
+        end
+        # last step: rounding
+        {k, round(v)}
+      end
+
+      links |> Enum.into(%{})
+    else links end
   end
 
   @doc """
@@ -115,13 +162,15 @@ defmodule Markov do
     current = current |> cond_sanitize_tokens(chain)
     # get links from current state
     # (enforce constant order by converting to proplist)
-    links = chain.links[current] |> Enum.into([])
+    links = chain.links[current]
+      |> cond_shift_probs(chain)
+      |> Enum.into([])
 
     # do the magic
     sum = Enum.unzip(links)
-        |> Tuple.to_list
-        |> List.last
-        |> Enum.sum
+      |> Tuple.to_list
+      |> List.last
+      |> Enum.sum
     :rand.uniform(sum) - 1 |> probabilistic_select(links, sum)
   end
 
