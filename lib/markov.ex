@@ -26,14 +26,14 @@ defmodule Markov do
         |> Enum.sort(fn {_, foo}, {_, bar} -> foo > bar end)
 
       # choose the peak
-      peak = max(1, length(links) * 0.25) |> floor()
+      peak = max(1, length(links) * 0.10) |> floor()
       {_, peak_prob} = Enum.at(links, peak)
       # determine by how much the first most probable path
       # is more likely than the peak
       {_, first_prob} = Enum.at(links, 0)
-      ratio = first_prob / peak_prob
+      ratio = min(first_prob / peak_prob, 10)
 
-      # https://www.desmos.com/calculator/nkomslcoqu
+      # https://www.desmos.com/calculator/mq3qjg8zpm
       # fun fact: this is literally the first time ever in my
       # 8 year long programming career that i actually had to
       # use "real" maths
@@ -45,14 +45,16 @@ defmodule Markov do
           # massively dampen probabilities before the peak
           i < peak ->
             offset = (first_prob / (ratio ** exp))
-            coeff = (peak_prob - (peak_prob * ratio / (ratio ** exp + 1))) / (peak ** 2)
-            {k, (coeff * (i ** exp)) + offset}
+            coeff = (peak_prob - (peak_prob * ratio / (ratio ** exp + 1))) / (peak ** ratio)
+            {k, (coeff * (i ** ratio)) + offset}
           # leave the peak as is
           i == peak ->
             {k, peak_prob}
           # gradual fall-off
           i > peak ->
-            {k, peak_prob / (i - 1)}
+            len = length(links)
+            coeff = peak_prob / ((len - peak - 1) ** (1 / ratio))
+            {k, coeff * ((-i + len - 1) ** (1 / ratio))}
         end
         # last step: rounding
         {k, round(v)}
