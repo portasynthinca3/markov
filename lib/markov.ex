@@ -178,7 +178,8 @@ defmodule Markov do
   Generates a list of tokens using the `chain`
 
   Optionally prepends `acc` to it and assumes the previous
-  two states were `[state1, state2]=state`.
+  two states were `[state1, state2]=state`. The amount of
+  the resulting token list is limited by `limit`.
 
   Returns the generated list.
 
@@ -190,14 +191,14 @@ defmodule Markov do
       ...> Markov.generate_tokens([], [:a, :b])
       [:c]
   """
-  @spec generate_tokens(%Markov{}, acc :: [any()], [any()]) :: String.t()
-  def generate_tokens(%Markov{}=chain, acc \\ [], state \\ [:start, :start]) do
+  @spec generate_tokens(%Markov{}, [any()], [any()], integer()) :: String.t()
+  def generate_tokens(%Markov{}=chain, acc \\ [], state \\ [:start, :start], limit \\ 100) do
     # iterate through states until :end
     new_state = next_state(chain, state)
-    unless new_state == :end do
-      generate_tokens(chain, acc ++ [new_state], [state |> Enum.at(1), new_state])
-    else
+    if new_state == :end or limit <= 0 do
       acc
+    else
+      generate_tokens(chain, acc ++ [new_state], [state |> Enum.at(1), new_state], limit - 1)
     end
   end
 
