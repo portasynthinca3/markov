@@ -27,10 +27,10 @@ defmodule Markov do
 
       # choose the peak
       peak = max(1, length(links) * 0.10) |> floor()
-      {_, peak_prob} = Enum.at(links, peak)
+      {_, peak_prob} = links |> Enum.at(peak)
       # determine by how much the first most probable path
       # is more likely than the peak
-      {_, first_prob} = Enum.at(links, 0)
+      {_, first_prob} = links |> Enum.at(0)
       ratio = min(first_prob / peak_prob, 10)
 
       # https://www.desmos.com/calculator/mq3qjg8zpm
@@ -39,8 +39,7 @@ defmodule Markov do
       # use "real" maths
 
       exp = 1.7
-      links = for i <- 0 .. length(links)-1 do
-        {k, _} = Enum.at(links, i)
+      links = for {i, {k, _}} <- Stream.zip(0 .. length(links)-1, links) do
         {k, v} = cond do
           # massively dampen probabilities before the peak
           i < peak ->
@@ -193,7 +192,7 @@ defmodule Markov do
       ...> Markov.generate_tokens([], [:a, :b])
       [:c]
   """
-  @spec generate_tokens(%Markov{}, [any()], [any()], integer()) :: String.t()
+  @spec generate_tokens(%Markov{}, [any()], [any()], integer()) :: [any()]
   def generate_tokens(%Markov{}=chain, acc \\ [], state \\ [:start, :start], limit \\ 100) do
     # iterate through states until :end
     new_state = next_state(chain, state)
