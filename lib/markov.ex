@@ -16,6 +16,28 @@ defmodule Markov do
     else tokens end
   end
 
+  # adjusts the probability of one connection
+  defp adjust_prob({i, {k, _}}, {peak, peak_prob, first_prob, ratio, len}) do
+    # https://www.desmos.com/calculator/mq3qjg8zpm
+    exp = 1.7
+    {k, v} = cond do
+      # massively dampen probabilities before the peak
+      i < peak ->
+        offset = (first_prob / (ratio ** exp))
+        coeff = (peak_prob - (peak_prob * ratio / (ratio ** exp + 1))) / (peak ** ratio)
+        {k, (coeff * (i ** ratio)) + offset}
+      # leave the peak as is
+      i == peak ->
+        {k, peak_prob}
+      # gradual fall-off
+      i > peak ->
+        coeff = peak_prob / ((len - peak - 1) ** (1 / ratio))
+        {k, coeff * ((-i + len - 1) ** (1 / ratio))}
+    end
+    # last step: rounding
+    {k, round(v)}
+  end
+
   # Conditionally shifts probabilities
   @spec cond_shift_probs(%{[any()] => any()}, %Markov{}) :: %{[any()] => any()}
   def cond_shift_probs(links, %Markov{shift: shift}) do
@@ -33,33 +55,12 @@ defmodule Markov do
       {_, first_prob} = links |> Enum.at(0)
       ratio = min(first_prob / peak_prob, 10)
 
-      # https://www.desmos.com/calculator/mq3qjg8zpm
-      # fun fact: this is literally the first time ever in my
-      # 8 year long programming career that i actually had to
-      # use "real" maths
+      params = {peak, peak_prob, first_prob, ratio, length(links)}
 
-      exp = 1.7
-      links = for {i, {k, _}} <- Stream.zip(0 .. length(links)-1, links) do
-        {k, v} = cond do
-          # massively dampen probabilities before the peak
-          i < peak ->
-            offset = (first_prob / (ratio ** exp))
-            coeff = (peak_prob - (peak_prob * ratio / (ratio ** exp + 1))) / (peak ** ratio)
-            {k, (coeff * (i ** ratio)) + offset}
-          # leave the peak as is
-          i == peak ->
-            {k, peak_prob}
-          # gradual fall-off
-          i > peak ->
-            len = length(links)
-            coeff = peak_prob / ((len - peak - 1) ** (1 / ratio))
-            {k, coeff * ((-i + len - 1) ** (1 / ratio))}
-        end
-        # last step: rounding
-        {k, round(v)}
-      end
-
-      links |> Enum.into(%{})
+      Stream.zip(0..length(links)-1, links)
+        |> Flow.from_enumerable()
+        |> Flow.map(&adjust_prob(&1, params))
+        |> Enum.into(%{})
     else links end
   end
 

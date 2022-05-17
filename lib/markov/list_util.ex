@@ -8,9 +8,10 @@ defmodule Markov.ListUtil do
   """
   @spec ttuples(list()) :: list()
   def ttuples(list) do
-    first_elements = list |> Enum.reverse |> tl() |> tl() |> Enum.reverse
-    second_elements = list |> tl() |> Enum.reverse |> tl() |> Enum.reverse
-    third_elements = list |> tl() |> tl()
-    Enum.zip([first_elements, second_elements, third_elements])
+    Enum.zip([
+      list |> Enum.slice(0..-3),
+      list |> Enum.slice(1..-2),
+      list |> Enum.slice(2..-1)
+    ])
   end
 end
