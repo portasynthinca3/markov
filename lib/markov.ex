@@ -5,6 +5,7 @@ defmodule Markov do
   """
 
   import Nx.Defn
+  @nx_batch_size 1000
 
   defstruct links: %{[:start, :start] => %{end: 1}},
             sanitize_tokens: false,
@@ -19,10 +20,37 @@ defmodule Markov do
   end
 
   @doc "Adjusts the probability of one connection"
-  defn adjust_prob(i, {peak, peak_prob, first_prob, ratio, len}) do
-    # https://www.desmos.com/calculator/mq3qjg8zpm
+  defn adjust_one_prob(param_tensor) do
+    i          = Nx.gather(param_tensor, Nx.tensor([[0]])) |> Nx.squeeze
+    peak       = Nx.gather(param_tensor, Nx.tensor([[1]])) |> Nx.squeeze
+    peak_prob  = Nx.gather(param_tensor, Nx.tensor([[2]])) |> Nx.squeeze
+    first_prob = Nx.gather(param_tensor, Nx.tensor([[3]])) |> Nx.squeeze
+    ratio      = Nx.gather(param_tensor, Nx.tensor([[4]])) |> Nx.squeeze
+    len        = Nx.gather(param_tensor, Nx.tensor([[5]])) |> Nx.squeeze
+
+    # linear approximation
+    # result = cond do
+    #   i < peak ->
+    #     a = peak_prob / ratio
+    #     k = (peak_prob - a) / peak
+    #     k * i + a
+    #
+    #   i == peak -> peak_prob
+    #
+    #   i > peak ->
+    #     last = len - 1
+    #     peak_to_last = last - peak
+    #     k = -Nx.min((ratio - 1) / peak_to_last, peak_prob / peak_to_last)
+    #     a = -k + peak_prob
+    #     k * i + a
+    #
+    #   # hopefully never reached
+    #   true -> Nx.Constants.nan
+    # end
+
     power = Nx.tensor(1.7, type: :f32)
 
+    # https://www.desmos.com/calculator/mq3qjg8zpm
     result = cond do
       i < peak ->
         offset = (first_prob / (ratio ** power))
@@ -36,14 +64,32 @@ defmodule Markov do
         coeff * ((-i + len - 1) ** (1 / ratio))
 
       # hopefully never reached
-      true -> 0
+      true -> Nx.Constants.nan
     end
 
-    # round off
-    Nx.round(result)
+    # round off and convert scalar to {1}-shape
+    Nx.round(result) |> Nx.tile([1])
   end
 
-  @doc "Conditionally shifts probabilities"
+  @doc "Adjust the probabilities of a batch of connections"
+  defn adjust_batch_probs(params) do
+    results = Nx.iota({@nx_batch_size}, type: :u32) |> Nx.map(fn _ -> -1 end)
+
+    {_, _, results} = while {i = 0, params, results}, i < @nx_batch_size do
+      result = adjust_one_prob(params[i])
+        |> Nx.as_type(:u32)
+
+      i_from_params = Nx.gather(params[i], Nx.tensor([[0]]))
+        |> Nx.squeeze
+        |> Nx.as_type(:u32)
+
+      {i + 1, params, Nx.put_slice(results, [i_from_params], result)}
+    end
+
+    results
+  end
+
+  @doc "Shifts probabilities if the model has a corresponding flag"
   @spec cond_shift_probs(%{[any()] => any()}, %Markov{}) :: %{[any()] => any()}
   def cond_shift_probs(links, %Markov{shift: shift}) when shift and map_size(links) >= 2 do
     # sort links by their probability
@@ -59,23 +105,22 @@ defmodule Markov do
     {_, first_prob} = links |> Enum.at(0)
     ratio = min(first_prob / peak_prob, 5)
 
-    jitted = EXLA.jit(&Markov.adjust_prob/2)
+    jitted = EXLA.jit(&Markov.adjust_batch_probs/1)
+    constant_params = [peak, peak_prob, first_prob, ratio, length(links)]
 
-    # this to-tensor conversion is done automatically by nx, but it's best to do it
-    # ahead of time since this tuple is constant
-    params = {
-      peak          |> Nx.tensor(type: :f32),
-      peak_prob     |> Nx.tensor(type: :f32),
-      first_prob    |> Nx.tensor(type: :f32),
-      ratio         |> Nx.tensor(type: :f32),
-      length(links) |> Nx.tensor(type: :f32)
-    }
-
-    Stream.zip(0..length(links)-1, links)
-      |> Stream.map(fn {i, {k, _}} ->
-          result = jitted.(i |> Nx.tensor(type: :f32), params)
-          {k, result |> Nx.to_number |> floor()}
-        end)
+    Stream.with_index(links)
+      |> Stream.chunk_every(@nx_batch_size)
+      |> Stream.map(fn batch ->
+        processed = batch
+          |> Enum.map(&elem(&1, 1))
+          |> Enum.map(fn idx -> [idx | constant_params] end)
+          |> Nx.tensor(type: :f32)
+          |> jitted.()
+          |> Nx.to_flat_list
+        Enum.zip(batch, processed) |> Enum.map(fn {{{k, _}, _}, v} -> {k, v} end)
+      end)
+      |> Enum.into([])
+      |> List.flatten
       |> Enum.into(%{})
   end
   def cond_shift_probs(links, _), do: links

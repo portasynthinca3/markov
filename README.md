@@ -8,7 +8,7 @@ Text generation library based on second-order Markov chains
 In `mix.exs`:
 ```elixir
 defp deps do
-  [{:markov, "~> 1.2"}]
+  [{:markov, "~> 1.3"}]
 end
 ```
 
