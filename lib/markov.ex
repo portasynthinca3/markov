@@ -4,11 +4,13 @@ defmodule Markov do
   Next token prediction uses two previous tokens.
   """
 
+  import Nx.Defn
+
   defstruct links: %{[:start, :start] => %{end: 1}},
             sanitize_tokens: false,
             shift: false
 
-  # Conditionally sanitizes a token list
+  # Conditionally sanitizes a token list"
   @spec cond_sanitize_tokens([any()], %Markov{}) :: [any()]
   defp cond_sanitize_tokens(tokens, chain) do
     if chain.sanitize_tokens do
@@ -16,53 +18,67 @@ defmodule Markov do
     else tokens end
   end
 
-  # adjusts the probability of one connection
-  defp adjust_prob({i, {k, _}}, {peak, peak_prob, first_prob, ratio, len}) do
+  @doc "Adjusts the probability of one connection"
+  defn adjust_prob(i, {peak, peak_prob, first_prob, ratio, len}) do
     # https://www.desmos.com/calculator/mq3qjg8zpm
-    exp = 1.7
-    {k, v} = cond do
-      # massively dampen probabilities before the peak
+    power = Nx.tensor(1.7, type: :f32)
+
+    result = cond do
       i < peak ->
-        offset = (first_prob / (ratio ** exp))
-        coeff = (peak_prob - (peak_prob * ratio / (ratio ** exp + 1))) / (peak ** ratio)
-        {k, (coeff * (i ** ratio)) + offset}
-      # leave the peak as is
-      i == peak ->
-        {k, peak_prob}
-      # gradual fall-off
+        offset = (first_prob / (ratio ** power))
+        coeff = (peak_prob - (peak_prob * ratio / (ratio ** power + 1))) / (peak ** ratio)
+        (coeff * (i ** ratio)) + offset
+
+      i == peak -> peak_prob
+
       i > peak ->
-        coeff = peak_prob / ((len - peak - 1) ** (1 / ratio))
-        {k, coeff * ((-i + len - 1) ** (1 / ratio))}
+        coeff = peak_prob / ((len - peak) ** (1 / ratio))
+        coeff * ((-i + len - 1) ** (1 / ratio))
+
+      # hopefully never reached
+      true -> 0
     end
-    # last step: rounding
-    {k, round(v)}
+
+    # round off
+    Nx.round(result)
   end
 
-  # Conditionally shifts probabilities
+  @doc "Conditionally shifts probabilities"
   @spec cond_shift_probs(%{[any()] => any()}, %Markov{}) :: %{[any()] => any()}
-  def cond_shift_probs(links, %Markov{shift: shift}) do
-    if shift and map_size(links) >= 2 do
-      # sort links by their probability
-      links = links
-        |> Enum.into([])
-        |> Enum.sort(fn {_, foo}, {_, bar} -> foo > bar end)
+  def cond_shift_probs(links, %Markov{shift: shift}) when shift and map_size(links) >= 2 do
+    # sort links by their probability
+    links = links
+      |> Enum.into([])
+      |> Enum.sort(fn {_, foo}, {_, bar} -> foo > bar end)
 
-      # choose the peak
-      peak = max(1, length(links) * 0.10) |> floor()
-      {_, peak_prob} = links |> Enum.at(peak)
-      # determine by how much the first most probable path
-      # is more likely than the peak
-      {_, first_prob} = links |> Enum.at(0)
-      ratio = min(first_prob / peak_prob, 10)
+    # choose the peak
+    peak = max(1, :math.sqrt(length(links)) * 0.1) |> floor()
+    {_, peak_prob} = links |> Enum.at(peak)
+    # determine by how much the first most probable path
+    # is more likely than the peak
+    {_, first_prob} = links |> Enum.at(0)
+    ratio = min(first_prob / peak_prob, 5)
 
-      params = {peak, peak_prob, first_prob, ratio, length(links)}
+    jitted = EXLA.jit(&Markov.adjust_prob/2)
 
-      Stream.zip(0..length(links)-1, links)
-        |> Flow.from_enumerable()
-        |> Flow.map(&adjust_prob(&1, params))
-        |> Enum.into(%{})
-    else links end
+    # this to-tensor conversion is done automatically by nx, but it's best to do it
+    # ahead of time since this tuple is constant
+    params = {
+      peak          |> Nx.tensor(type: :f32),
+      peak_prob     |> Nx.tensor(type: :f32),
+      first_prob    |> Nx.tensor(type: :f32),
+      ratio         |> Nx.tensor(type: :f32),
+      length(links) |> Nx.tensor(type: :f32)
+    }
+
+    Stream.zip(0..length(links)-1, links)
+      |> Stream.map(fn {i, {k, _}} ->
+          result = jitted.(i |> Nx.tensor(type: :f32), params)
+          {k, result |> Nx.to_number |> floor()}
+        end)
+      |> Enum.into(%{})
   end
+  def cond_shift_probs(links, _), do: links
 
   @doc """
   Trains `chain` using `text` or a list of `tokens`.

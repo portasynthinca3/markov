@@ -4,7 +4,7 @@ defmodule Markov.MixProject do
   def project do
     [
       app: :markov,
-      version: "1.3.0",
+      version: "1.3.1",
       elixir: "~> 1.12",
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
@@ -23,7 +23,9 @@ defmodule Markov.MixProject do
   defp deps do
     [
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
-      {:flow, ">= 1.2.0"}
+      {:flow, ">= 1.2.0"},
+      {:nx, "~> 0.3"},
+      {:exla, "~> 0.3"}
     ]
   end
 
