@@ -14,6 +14,13 @@ defmodule Markov.MixProject do
     ]
   end
 
+  def application do
+    [
+      extra_applications: [],
+      mod: {Markov.App, []}
+    ]
+  end
+
   defp description do
     """
     Text generation library based on second-order Markov chains
@@ -22,11 +29,13 @@ defmodule Markov.MixProject do
 
   defp deps do
     [
-      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
-      {:flow, ">= 1.2.0"},
+      {:flow, "~> 1.2"},
       {:nx, "~> 0.3"},
       {:exla, "~> 0.3"},
-      {:ex_hash_ring, "~> 6.0"}
+      {:libring, "~> 1.6"},
+      {:ex_doc, "~> 0.28", only: :dev, runtime: false},
+      {:observer_cli, "~> 1.7", only: :dev, runtime: false},
+      {:credo, "~> 1.6", only: :dev, runtime: false},
     ]
   end
 
