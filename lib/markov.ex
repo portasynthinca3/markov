@@ -9,36 +9,36 @@ defmodule Markov do
       {:ok, model} = Markov.load("/base/directory", "model_name", sanitize_tokens: true, store_history: [:train])
 
       # train using four strings
-      model
-        |> Markov.train("hello, world!")
-        |> Markov.train("example string number two")
-        |> Markov.train("hello, Elixir!")
-        |> Markov.train("fourth string")
+      :ok = Markov.train(model, "hello, world!")
+      :ok = Markov.train(model, "example string number two")
+      :ok = Markov.train(model, "hello, Elixir!")
+      :ok = Markov.train(model, "fourth string")
 
       # generate text
-      model |> Markov.generate_text |> IO.inspect
+      {:ok, text} = Markov.generate_text(model)
+      IO.inspect(text)
 
       # unload model from RAM
-      model |> Markov.unload
+      Markov.unload(model)
 
-      # this will raise because the model is unloaded
-      # model |> Markov.generate_text |> IO.inspect
-      # model |> Markov.train("hello, world!")
+      # these will return errors because the model is unloaded
+      # Markov.generate_text(model)
+      # Markov.train(model, "hello, world!")
 
       # load the model again
       {:ok, model} = Markov.load("/base/directory", "model_name")
 
       # enable probability shifting and generate text
-      model
-        |> Markov.configure(shift_probabilities: true)
-        |> Markov.generate_text |> IO.inspect
+      :ok = Markov.configure(model, shift_probabilities: true)
+      {:ok, text} = Markov.generate_text(model)
+      IO.inspect(text)
 
       # print uninteresting stats
       model |> Markov.stats |> IO.inspect
       model |> Markov.training_data |> IO.inspect
 
       # this will also write our new just-set option
-      model |> Markov.unload
+      Markov.unload(model)
   """
 
   @opaque model_reference() :: pid()
@@ -115,5 +115,26 @@ defmodule Markov do
   @spec get_config(model :: model_reference()) :: {:ok, [model_option()]} | {:error, term()}
   def get_config(model) do
     GenServer.call(model, :get_config)
+  end
+
+  @doc """
+  Trains `chain` using text or a list of tokens.
+
+      :ok = Markov.train(model, "Hello, world!")
+      :ok = Markov.train(model, "this is a string that's broken down into tokens behind the scenes")
+      :ok = Markov.train(model, [
+        :this, "is", 'a token', :list, "where",
+        {:each_element, :is, {:taken, :as_is},
+         :and, :can_be, :erlang.make_ref(), "<-- any term"}
+      ])
+  """
+  @spec train(model_reference(), String.t() | [term()]) :: :ok | {:error, term()}
+  def train(model, text) when is_binary(text) do
+    tokens = String.split(text)
+    train(model, tokens)
+  end
+  def train(model, tokens) when is_list(tokens) do
+    tokens = [:start, :start] ++ tokens ++ [:end]
+    GenServer.call(model, {:train, tokens})
   end
 end

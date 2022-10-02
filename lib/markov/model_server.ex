@@ -18,12 +18,11 @@ defmodule Markov.ModelServer do
     defstruct [
       :name, :path,               # model name and path
       ring: %HashRing{},          # current ring during normal operation, old ring during a repartition
-      new_ring: %HashRing{},      # inactive during normal operation, new ring during a repartition
+      new_ring: nil,              # inactive during normal operation, new ring during a repartition
       options: [],                # configured options
       repartition_status: %{},    # map of partition statuses during a repartition
       repartition_backlog: [],    # training operations deferred until repartitioning is complete
       total_links: 0,             # total links across all partitions
-      total_partitions: 0,        # total partitions in use
       open_partitions: %MapSet{}  # set of currently loaded partitions
     ]
   end
@@ -80,6 +79,8 @@ defmodule Markov.ModelServer do
 
         case result do
           {:ok, state} ->
+            state = open_partition!(state, 0)
+            state = %State{state | ring: HashRing.add_node(state.ring, 0)}
             log(state, "created state")
             {:ok, state}
 
@@ -157,18 +158,18 @@ defmodule Markov.ModelServer do
       |> Map.replace(:open_partitions, %MapSet{})
   end
 
-  @spec open_partition!(state :: State.t(), num :: integer()) :: {:partition, String.t(), integer()}
+  @spec open_partition!(state :: State.t(), num :: integer()) :: State.t()
   defp open_partition!(state, num) do
-    file = Path.join(state.path, "part_#{num}.dets")
-    {:ok, name} = :dets.open_file({:partition, state.name, num}, file: file, ram_file: true)
+    file = Path.join(state.path, "part_#{num}.dets") |> :erlang.binary_to_list
+    {:ok, _} = :dets.open_file({:partition, state.name, num}, file: file, ram_file: true)
     log(state, "opened partition #{num}")
-    name
+    %State{state | open_partitions: MapSet.put(state.open_partitions, num)}
   end
 
-  @spec open_partition!(state :: State.t(), num :: integer()) :: :ok
+  @spec close_partition!(state :: State.t(), num :: integer()) :: State.t()
   defp close_partition!(state, num) do
     :ok = :dets.close({:partition, state.name, num})
     log(state, "closed partition #{num}")
-    :ok
+    %State{state | open_partitions: MapSet.delete(state.open_partitions, num)}
   end
 end
