@@ -110,4 +110,23 @@ defmodule MarkovTest do
 
     Markov.unload(model)
   end
+
+  test "log reading" do
+    File.rm_rf("./test/model_log")
+    {:ok, model} = Markov.load("test", "model_log")
+
+    assert Markov.train(model, "1") == {:ok, :done}
+    assert Markov.generate_text(model) == {:ok, "1"}
+    matches = case Markov.read_log(model) do
+      {:ok, [
+        {_, :start, nil},
+        {_, :train, ["1"]},
+        {_, :gen, ["1"]},
+      ]} -> true
+      _ -> false
+    end
+    assert matches
+
+    Markov.unload(model)
+  end
 end
