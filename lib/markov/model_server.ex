@@ -27,6 +27,7 @@ defmodule Markov.ModelServer do
   """
 
   require Logger
+  alias Markov.ModelActions
 
   defmodule State do
     defstruct [
@@ -155,9 +156,17 @@ defmodule Markov.ModelServer do
       {:reply, {:ok, :deferred}, %State{state |
         repartition_backlog: [tokens | state.repartition_backlog]}}
     else
-      state = do_train(state, tokens)
+      state = ModelActions.train(state, tokens)
+      write_log_entry(state, :train, tokens)
       {:reply, {:ok, :done}, state}
     end
+  end
+
+  @spec handle_call(request :: :generate, from :: term(), state :: State.t()) :: {:reply, term(), State.t()}
+  def handle_call(:generate, _, state) do
+    result = ModelActions.generate(state)
+    write_log_entry(state, :gen, result)
+    {:reply, {:ok, result}, state}
   end
 
   @spec handle_info({:unload_part, integer()}, State.t()) :: {:noreply, State.t()}
@@ -170,37 +179,6 @@ defmodule Markov.ModelServer do
   def handle_info({:EXIT, _pid, :normal}, state), do: {:noreply, state}
 
   # Internal functions
-
-  @spec do_train(state :: State.t(), tokens :: [term()]) :: :ok
-  defp do_train(state, tokens) do
-    write_log_entry(state, :train, tokens)
-
-    order = state.options[:order]
-    tokens = Enum.map(0..(order-1), fn _ -> :start end) ++ tokens ++ [:end]
-    Markov.ListUtil.overlapping_stride(tokens, order + 1) |> Enum.reduce(state, fn bit, state ->
-      from = Enum.slice(bit, 0..-2)
-      to = Enum.at(bit, -1)
-
-      # sanitize tokens
-      from = if state.options[:sanitize_tokens] do
-        Enum.map(from, &Markov.TextUtil.sanitize_token/1)
-      else from end
-
-      partition = HashRing.key_to_node(state.ring, from)
-      state = open_partition!(state, partition) # doesn't do anything if already open
-      send(Map.get(state.open_partitions, partition), :defer) # signal usage
-      links_from = :dets.lookup({:partition, state.name, partition}, from)
-      links_from = case links_from do
-        [] -> %{}
-        [{^from, links}] -> links
-      end
-
-      new_weight = if links_from[to] == nil, do: 1, else: links_from[to] + 1
-      links_from = Map.put(links_from, to, new_weight)
-      :dets.insert({:partition, state.name, partition}, {from, links_from})
-      state
-    end)
-  end
 
   @spec write_log_entry(state :: State.t(), type :: Markov.log_entry_type(), data:: term()) :: :ok | :ignored
   defp write_log_entry(state, type, data) do
@@ -262,7 +240,7 @@ defmodule Markov.ModelServer do
   end
 
   @spec open_partition!(state :: State.t(), num :: integer()) :: State.t()
-  defp open_partition!(state, num) do
+  def open_partition!(state, num) do
     if Map.has_key?(state.open_partitions, num) do
       state
     else

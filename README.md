@@ -21,7 +21,7 @@ end
 
 Unlike Markov 1.x, this version has very strong opinions on how you should create and persist your models.
 
-Example workflow:
+Example workflow (click [here](https://hexdocs.pm/markov/api-reference.html) for full docs):
 ```elixir
 # the model is to be stored under /base/directory/model_name
 # the model will be created using specified options if not found
@@ -59,5 +59,3 @@ model |> Markov.read_log |> IO.inspect
 # this will also write our new just-set option
 Markov.unload(model)
 ```
-
-View the full documentation [here](https://hexdocs.pm/markov/api-reference.html)

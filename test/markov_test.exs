@@ -85,4 +85,29 @@ defmodule MarkovTest do
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
   end
+
+  test "generation" do
+    File.rm_rf("./test/model_generation")
+    {:ok, model} = Markov.load("test", "model_generation")
+    assert Markov.train(model, "a b c d") == {:ok, :done}
+    assert Markov.generate_text(model) == {:ok, "a b c d"}
+    Markov.unload(model)
+  end
+
+  test "probability correctness" do
+    File.rm_rf("./test/model_generation")
+    {:ok, model} = Markov.load("test", "model_generation")
+
+    assert Markov.train(model, "1") == {:ok, :done}
+    assert Markov.train(model, "2") == {:ok, :done}
+
+    {one, two} = Enum.reduce(1..500, {0, 0}, fn _, {one, two} ->
+      if Markov.generate_text(model) == {:ok, "1"}, do: {one + 1, two}, else: {one, two + 1}
+    end) |> IO.inspect
+    assert one >= 225 and one <= 275
+    assert two >= 225 and two <= 275
+    assert one + two == 500
+
+    Markov.unload(model)
+  end
 end

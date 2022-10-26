@@ -173,16 +173,30 @@ defmodule Markov do
 
   @doc """
   Predicts (generates) a list of tokens
+
+      iex> Markov.generate_tokens(model)
+      {:ok, ["hello", "world"]}
   """
   @spec generate_tokens(model_reference()) :: {:ok, [term()]} | {:error, term()}
   def generate_tokens(model) do
+    GenServer.call(model, :generate)
+  end
 
+  @doc """
+  Predicts (generates) a string. Will raise an exception if the model
+  was trained on non-textual tokens at least once
+  """
+  def generate_text(model) do
+    case generate_tokens(model) do
+      {:ok, text} -> {:ok, Enum.join(text, " ")}
+      {:error, _} = err -> err
+    end
   end
 
   @doc """
   Reads the log file and returns a list of entries in chronological order
 
-      iex(3)> Markov.read_log(model)
+      iex> Markov.read_log(model)
       {:ok,
        [
          {~U[2022-10-02 16:59:51.844Z], :start, nil},
