@@ -1,7 +1,7 @@
 defmodule Markov.TextUtil do
   @doc """
-  Strips textual tokens of preceding and trailing non-word characters, as well
-  as downcases them
+  Strips textual tokens of preceding and trailing non-word characters and
+  downcases them
 
       iex> Markov.TextUtil.sanitize_token(:atom)
       :atom

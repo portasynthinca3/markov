@@ -1,5 +1,5 @@
 # Markov
-Text generation library based on second-order Markov chains
+Text generation library based on nth-order Markov chains
 
 ![Hex.pm](https://img.shields.io/hexpm/v/markov)
 ![Hex.pm](https://img.shields.io/hexpm/dd/markov)
@@ -28,10 +28,10 @@ Example workflow:
 {:ok, model} = Markov.load("/base/directory", "model_name", sanitize_tokens: true, store_history: [:train])
 
 # train using four strings
-:ok = Markov.train(model, "hello, world!")
-:ok = Markov.train(model, "example string number two")
-:ok = Markov.train(model, "hello, Elixir!")
-:ok = Markov.train(model, "fourth string")
+{:ok, _} = Markov.train(model, "hello, world!")
+{:ok, _} = Markov.train(model, "example string number two")
+{:ok, _} = Markov.train(model, "hello, Elixir!")
+{:ok, _} = Markov.train(model, "fourth string")
 
 # generate text
 {:ok, text} = Markov.generate_text(model)
@@ -53,8 +53,8 @@ Markov.unload(model)
 IO.inspect(text)
 
 # print uninteresting stats
-model |> Markov.stats |> IO.inspect
-model |> Markov.training_data |> IO.inspect
+model |> Markov.dump_partition(0) |> IO.inspect
+model |> Markov.read_log |> IO.inspect
 
 # this will also write our new just-set option
 Markov.unload(model)
