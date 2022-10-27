@@ -161,33 +161,115 @@ defmodule Markov do
     - `:done` - training is complete
     - `:deferred` - a repartition is currently in progress, this request has
     been placed in the backlog to be fulfilled after repartitioning is complete
+
+  See `generate_text/2` for more info about `specifiers`
   """
-  @spec train(model_reference(), String.t() | [term()]) :: {:ok, :done | :deferred} | {:error, term()}
-  def train(model, text) when is_binary(text) do
+  @spec train(model_reference(), String.t() | [term()], [term()]) :: {:ok, :done | :deferred} | {:error, term()}
+  def train(model, text, tags \\ [:"$none"])
+  def train(model, text, tags) when is_binary(text) do
     tokens = String.split(text)
-    train(model, tokens)
+    train(model, tokens, tags)
   end
-  def train(model, tokens) when is_list(tokens) do
-    GenServer.call(model, {:train, tokens})
+  def train(model, tokens, tags) when is_list(tokens) do
+    GenServer.call(model, {:train, tokens, tags})
   end
+
+  @typedoc """
+  If data was tagged when training, you can use tag queries to only select
+  generation paths that match a set of criteria
+
+    - `true` always matches
+    - `{x, :or, y}` matches when either `x` or `y` matches
+    - `{:not, x}` matches if x doesn't match, and vice versa
+    - `{x, :score, y}` is only allowed at the top level; the total score counter
+    (initially 0) is increased by `score` for every element `{query, score}` of
+    `y` (a list) that matches; probabilities are then adjusted according to those
+    scores.
+    - any other term is treated as a tag (note the `:"$none"` tag - the default
+    one)
+
+  ### Examples:
+
+      # training
+      iex> Markov.train(model, "hello earth", [
+        {:action, :saying_hello}, # <- terms of any type can function as tags
+        {:subject_type, :planet},
+        {:subject, "earth"},
+        :lowercase
+      ])
+      {:ok, :done}
+      iex> Markov.train(model, "Hello Elixir", [
+        {:action, :saying_hello},
+        {:subject_type, :programming_language},
+        {:subject, "Elixir"},
+        :uppercase
+      ])
+      {:ok, :done}
+
+
+      # simple generation - both paths have equal probabilities
+      iex> Markov.generate_text(model)
+      {:ok, "hello earth"}
+      iex> Markov.generate_text(model)
+      {:ok, "hello Elixir"}
+
+      # simple tag queries
+      iex> Markov.generate_text(model, {:subject_type, :planet})
+      {:ok, "hello earth"}
+      iex> Markov.generate_text(model, :lowercase)
+      {:ok, "hello earth"}
+      iex> Markov.generate_text(model, {:subject_type, :programming_language})
+      {:ok, "hello Elixir"}
+      iex> Markov.generate_text(model, :uppercase)
+      {:ok, "hello Elixir"}
+
+      # both possible generation paths were tagged with this tag
+      iex> Markov.generate_text(model, {:action, :saying_hello})
+      {:ok, "hello earth"}
+      iex> Markov.generate_text(model, {:action, :saying_hello})
+      {:ok, "hello Elixir"}
+
+      # both paths match, but "hello Elixir" has a score of 1 and "hello earth"
+      # has a score of zero; thus, "hello Elixir" has a probability of 2/3, and
+      # "hello earth" has that of 1/3
+      iex> Markov.generate_text(model, {true, :score, [:uppercase]})
+      {:ok, "hello Elixir"}
+      iex> Markov.generate_text(model, {true, :score, [:uppercase]})
+      {:ok, "hello earth"}
+
+  """
+  @type tag_query() ::
+    true |
+    {tag_query(), :or, tag_query()} |
+    {tag_query(), :score, [{tag_query(), integer()}]} |
+    {:not, tag_query()} |
+    term()
 
   @doc """
   Predicts (generates) a list of tokens
 
       iex> Markov.generate_tokens(model)
       {:ok, ["hello", "world"]}
+
+  See type `tag_query/0` for more info about `tags`
   """
-  @spec generate_tokens(model_reference()) :: {:ok, [term()]} | {:error, term()}
-  def generate_tokens(model) do
-    GenServer.call(model, :generate)
+  @spec generate_tokens(model_reference(), tag_query()) :: {:ok, [term()]} | {:error, term()}
+  def generate_tokens(model, tag_query \\ true) do
+    GenServer.call(model, {:generate, tag_query})
   end
 
   @doc """
   Predicts (generates) a string. Will raise an exception if the model
   was trained on non-textual tokens at least once
+
+      iex> Markov.generate_text(model)
+      {:ok, "hello world"}
+
+  See type `tag_query/0` for more info about `tags`
   """
-  def generate_text(model) do
-    case generate_tokens(model) do
+  @spec generate_text(model_reference(), tag_query()) :: {:ok, binary()} | {:error, term()}
+  def generate_text(model, tag_query \\ true) do
+    case generate_tokens(model, tag_query) do
       {:ok, text} -> {:ok, Enum.join(text, " ")}
       {:error, _} = err -> err
     end
@@ -223,23 +305,7 @@ defmodule Markov do
     read_log_entries(handle, size, pos + 2 + entry_size, [entry | acc])
   end
 
-  @doc """
-  Reads an entire partition for debugging purposes
-
-      iex(4)> Markov.dump_partition(model, 0)
-      [
-        # this means that the model has met 13 instances of the token "hello"
-        # coming after tokens :start and :start, the two the model starts
-        # with in all operations:
-        {{:start, :start}, %{"hello" => 13}},
-        {{"hello", "world"}, %{end: 12}},
-        {{"hello", "world)"}, %{end: 1}},
-        # this means that the model has met 12 instances of the token "world"
-        # and 1 instance of the token "world)" coming after tokens
-        # :start and "hello"
-        {{:start, "hello"}, %{"world" => 12, "world)" => 1}}
-      ]
-  """
+  @doc "Reads an entire partition for debugging purposes"
   @spec dump_partition(model_reference(), integer()) :: [{{term(), term()}, %{term() => integer()}}]
   def dump_partition(model, part_no) do
     # the server opens the table for us

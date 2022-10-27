@@ -44,10 +44,11 @@ defmodule MarkovTest do
     assert Markov.train(model, "hello world 2") == {:ok, :done}
     tokens = Markov.dump_partition(model, 0) |> MapSet.new
     reference = MapSet.new([
-      {[:start, :start], %{"hello" => 2}},
-      {[:start, "hello"], %{"world" => 2}},
-      {["hello", "world"], %{:end => 1, "2" => 1}},
-      {["world", "2"], %{end: 1}},
+      {[:start, :start], :"$none", "hello", 2},
+      {[:start, "hello"], :"$none", "world", 2},
+      {["hello", "world"], :"$none", :end, 1},
+      {["hello", "world"], :"$none", "2", 1},
+      {["world", "2"], :"$none", :end, 1}
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
@@ -60,9 +61,11 @@ defmodule MarkovTest do
     assert Markov.train(model, "hello, World") == {:ok, :done}
     tokens = Markov.dump_partition(model, 0) |> MapSet.new
     reference = MapSet.new([
-      {[:start, :start], %{"hello" => 1, "hello," => 1}},
-      {[:start, "hello"], %{"world" => 1, "World" => 1}},
-      {["hello", "world"], %{:end => 2}},
+      {[:start, :start], :"$none", "hello", 1},
+      {[:start, :start], :"$none", "hello,", 1},
+      {[:start, "hello"], :"$none", "World", 1},
+      {[:start, "hello"], :"$none", "world", 1},
+      {["hello", "world"], :"$none", :end, 2}
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
@@ -75,12 +78,13 @@ defmodule MarkovTest do
     assert Markov.train(model, "a b c d") == {:ok, :done}
     tokens = Markov.dump_partition(model, 0) |> MapSet.new
     reference = MapSet.new([
-      {[:start, :start, :start, :start, :start], %{"a" => 2}},
-      {[:start, :start, :start, :start, "a"], %{"b" => 2}},
-      {[:start, :start, :start, "a", "b"], %{"c" => 2}},
-      {[:start, :start, "a", "b", "c"], %{"d" => 2}},
-      {[:start, "a", "b", "c", "d"], %{"e" => 1, :end => 1}},
-      {["a", "b", "c", "d", "e"], %{end: 1}},
+      {[:start, :start, :start, :start, :start], :"$none", "a", 2},
+      {[:start, :start, :start, :start, "a"], :"$none", "b", 2},
+      {[:start, :start, :start, "a", "b"], :"$none", "c", 2},
+      {[:start, :start, "a", "b", "c"], :"$none", "d", 2},
+      {[:start, "a", "b", "c", "d"], :"$none", :end, 1},
+      {[:start, "a", "b", "c", "d"], :"$none", "e", 1},
+      {["a", "b", "c", "d", "e"], :"$none", :end, 1}
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
@@ -103,7 +107,7 @@ defmodule MarkovTest do
 
     {one, two} = Enum.reduce(1..500, {0, 0}, fn _, {one, two} ->
       if Markov.generate_text(model) == {:ok, "1"}, do: {one + 1, two}, else: {one, two + 1}
-    end) |> IO.inspect
+    end)
     assert one >= 225 and one <= 275
     assert two >= 225 and two <= 275
     assert one + two == 500
@@ -121,7 +125,7 @@ defmodule MarkovTest do
       {:ok, [
         {_, :start, nil},
         {_, :train, ["1"]},
-        {_, :gen, ["1"]},
+        {_, :gen, {:ok, ["1"]}},
       ]} -> true
       _ -> false
     end

@@ -41,6 +41,17 @@ defmodule Markov.ModelServer do
       open_partitions: %{},    # map of currently loaded partitions to timeout process PIDs
       log_handle: nil,         # log file handle (append mode)
     ]
+    @type t :: %__MODULE__{
+      name: String.t(), path: String.t(),
+      ring: HashRing.t(),
+      new_ring: HashRing.t() | nil,
+      options: [Markov.model_option()],
+      repartition_status: %{},
+      repartition_backlog: [[term()]],
+      total_links: non_neg_integer(),
+      open_partitions: %{non_neg_integer() => pid()},
+      log_handle: File.io_device()
+    }
   end
 
   # Semi-public API
@@ -148,25 +159,25 @@ defmodule Markov.ModelServer do
     {:reply, {:ok, {:partition, state.name, part}}, state}
   end
 
-  @spec handle_call(request :: {:train, [term()]}, from :: term(), state :: State.t()) :: {:reply, term(), State.t()}
-  def handle_call({:train, tokens}, _, state) do
+  @spec handle_call(request :: {:train, [term()], [term()]}, from :: term(), state :: State.t()) :: {:reply, term(), State.t()}
+  def handle_call({:train, tokens, specifiers}, _, state) do
     # check if a repartition is in progress
     if map_size(state.repartition_status) > 0 do
       write_log_entry(state, :train_deferred, tokens)
       {:reply, {:ok, :deferred}, %State{state |
         repartition_backlog: [tokens | state.repartition_backlog]}}
     else
-      state = ModelActions.train(state, tokens)
+      state = ModelActions.train(state, tokens, specifiers)
       write_log_entry(state, :train, tokens)
       {:reply, {:ok, :done}, state}
     end
   end
 
-  @spec handle_call(request :: :generate, from :: term(), state :: State.t()) :: {:reply, term(), State.t()}
-  def handle_call(:generate, _, state) do
-    result = ModelActions.generate(state)
+  @spec handle_call(request :: {:generate, Markov.tag_query()}, from :: term(), state :: State.t()) :: {:reply, term(), State.t()}
+  def handle_call({:generate, tag_query}, _, state) do
+    {result, state} = ModelActions.generate(state, tag_query)
     write_log_entry(state, :gen, result)
-    {:reply, {:ok, result}, state}
+    {:reply, result, state}
   end
 
   @spec handle_info({:unload_part, integer()}, State.t()) :: {:noreply, State.t()}
@@ -245,7 +256,7 @@ defmodule Markov.ModelServer do
       state
     else
       file = Path.join(state.path, "part_#{num}.dets") |> :erlang.binary_to_list
-      {:ok, _} = :dets.open_file({:partition, state.name, num}, file: file, ram_file: true)
+      {:ok, _} = :dets.open_file({:partition, state.name, num}, file: file, ram_file: true, type: :bag)
       pid = Markov.PartTimeout.start_link(self(), state.options[:partition_timeout], num)
       log(state, "opened partition #{num}")
       %State{state | open_partitions: Map.put(state.open_partitions, num, pid)}
