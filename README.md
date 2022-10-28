@@ -59,3 +59,6 @@ model |> Markov.read_log |> IO.inspect
 # this will also write our new just-set option
 Markov.unload(model)
 ```
+
+## Credits
+  - [https://www.bragitoff.com/2016/03/english-dictionary-in-csv-format/](The English dictionary in a CSV format)

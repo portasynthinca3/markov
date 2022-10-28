@@ -9,3 +9,4 @@ markov-*.tar
 /tmp/
 /.elixir_ls/
 /test/model_*/
+/dict.csv

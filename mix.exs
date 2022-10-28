@@ -35,7 +35,7 @@ defmodule Markov.MixProject do
       {:libring, "~> 1.6"},
       {:ex_doc, "~> 0.28", only: :dev, runtime: false},
       {:observer_cli, "~> 1.7", only: :dev, runtime: false},
-      {:credo, "~> 1.6", only: :dev, runtime: false},
+      {:credo, "~> 1.6", only: :dev, runtime: false}
     ]
   end
 

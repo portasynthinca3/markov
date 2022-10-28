@@ -17,6 +17,7 @@ defmodule Markov.Sup do
     children = [
       {DynamicSupervisor, name: Markov.ModelSup},
       {Registry, keys: :unique, name: Markov.ModelServers},
+      Markov.DictionaryHolder
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
