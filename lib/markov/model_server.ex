@@ -205,7 +205,7 @@ defmodule Markov.ModelServer do
 
   @spec log(state :: State.t(), string :: String.t()) :: term()
   defp log(state, string) do
-    # Logger.debug("model \"#{state.name}\" (#{self() |> inspect()}): #{string}")
+    Logger.debug("model \"#{state.name}\" (#{self() |> inspect()}): #{string}")
   end
 
   @spec configure(old_state :: State.t(), opts :: [Markov.model_option()]) :: {:ok, State.t()} | {:error, term()}

@@ -75,7 +75,7 @@ defmodule Markov.ModelActions do
             :dets.insert(table, {from, tag, to, previous + 1})
         end
       end
-      state
+      %{state | total_links: state.total_links + 1}
     end)
   end
 
