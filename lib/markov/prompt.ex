@@ -33,7 +33,6 @@ defmodule Markov.Prompt do
 
     Enum.zip(tokens, range)
       |> Enum.flat_map(fn item -> map_token(item, thres) end)
-      |> IO.inspect
   end
 
   @doc """
