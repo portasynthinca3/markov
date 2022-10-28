@@ -1,4 +1,6 @@
 # Markov
+<img align="right" src="logo/logo.png" onerror="this.src = 'assets/logo.png'">
+
 Text generation library based on nth-order Markov chains
 
 ![Hex.pm](https://img.shields.io/hexpm/v/markov)
@@ -8,6 +10,8 @@ Text generation library based on nth-order Markov chains
   - **Token sanitation** (optional): ignores letter case and punctuation when switching states, but still keeps the output as-is
   - **Operation history** (optional): recalls the operations it was instructed to perform, incl. past training data
   - **Probability shifting** (optional): gives less popular generation paths more chance to get used, which makes the output more original but may produce nonsense
+  - **Tagging** (optional): you can tag your source data to be queried later by aggregating those tags in any way you want, kind of like a database
+  - **Context awareness** (optional) grants your model the ability to answer questions given to it provided training data is good enough
   - **Managed disk storage**
   - **Transparent fragmentation** reduces RAM usage and loading times with huge models
 
@@ -61,4 +65,4 @@ Markov.unload(model)
 ```
 
 ## Credits
-  - [https://www.bragitoff.com/2016/03/english-dictionary-in-csv-format/](The English dictionary in a CSV format)
+  - [The English dictionary in a CSV format](https://www.bragitoff.com/2016/03/english-dictionary-in-csv-format/)

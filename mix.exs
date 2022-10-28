@@ -10,7 +10,13 @@ defmodule Markov.MixProject do
       start_permanent: Mix.env == :prod,
       description: description(),
       deps: deps(),
-      package: package()
+      package: package(),
+      docs: [
+        main: "readme",
+        extras: ["README.md"],
+        logo: "logo/logo.png",
+        assets: "doc_assets"
+      ]
     ]
   end
 
