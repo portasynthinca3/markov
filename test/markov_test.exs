@@ -2,8 +2,8 @@ defmodule MarkovTest do
   use ExUnit.Case
 
   test "creating the model" do
-    File.rm_rf(Path.join("test", "model_empty"))
-    {:ok, model} = Markov.load("test", "model_empty")
+    File.rm_rf(Path.join("test", "model"))
+    {:ok, model} = Markov.load("test", "model")
     Markov.unload(model)
   end
 
@@ -12,7 +12,7 @@ defmodule MarkovTest do
   end
 
   test "reconfiguration" do
-    {:ok, model} = Markov.load("test", "model_reconfig")
+    {:ok, model} = Markov.load("test", "model")
     Markov.configure(model, partition_size: 5000)
     {:ok, config} = Markov.get_config(model)
     Markov.unload(model)
@@ -20,26 +20,26 @@ defmodule MarkovTest do
   end
 
   test "configuration persistence" do
-    {:ok, model} = Markov.load("test", "model_reconfig")
+    {:ok, model} = Markov.load("test", "model")
     Markov.configure(model, partition_size: 7500)
     Markov.unload(model)
-    {:ok, model} = Markov.load("test", "model_reconfig")
+    {:ok, model} = Markov.load("test", "model")
     {:ok, config} = Markov.get_config(model)
     assert config[:partition_size] == 7500
     Markov.unload(model)
   end
 
   test "invalid configuration" do
-    File.rm_rf(Path.join("test", "model_reconfig"))
-    {:ok, model} = Markov.load("test", "model_reconfig")
+    File.rm_rf(Path.join("test", "model"))
+    {:ok, model} = Markov.load("test", "model")
     assert Markov.configure(model, sanitize_tokens: true) == {:error, :cant_change_sanitation}
     assert Markov.configure(model, order: 3) == {:error, :cant_change_order}
     Markov.unload(model)
   end
 
   test "training" do
-    File.rm_rf("./test/model_training_singlepart")
-    {:ok, model} = Markov.load("test", "model_training_singlepart")
+    File.rm_rf("./test/model")
+    {:ok, model} = Markov.load("test", "model")
     assert Markov.train(model, "hello world") == {:ok, :done}
     assert Markov.train(model, "hello world 2") == {:ok, :done}
     tokens = Markov.dump_partition(model, 0) |> MapSet.new
@@ -55,8 +55,8 @@ defmodule MarkovTest do
   end
 
   test "training with token sanitation" do
-    File.rm_rf("./test/model_training_singlepart")
-    {:ok, model} = Markov.load("test", "model_training_singlepart", sanitize_tokens: true)
+    File.rm_rf("./test/model")
+    {:ok, model} = Markov.load("test", "model", sanitize_tokens: true)
     assert Markov.train(model, "hello world") == {:ok, :done}
     assert Markov.train(model, "hello, World") == {:ok, :done}
     tokens = Markov.dump_partition(model, 0) |> MapSet.new
@@ -72,8 +72,8 @@ defmodule MarkovTest do
   end
 
   test "training 5th order chain" do
-    File.rm_rf("./test/model_training_singlepart")
-    {:ok, model} = Markov.load("test", "model_training_singlepart", order: 5)
+    File.rm_rf("./test/model")
+    {:ok, model} = Markov.load("test", "model", order: 5)
     assert Markov.train(model, "a b c d e") == {:ok, :done}
     assert Markov.train(model, "a b c d") == {:ok, :done}
     tokens = Markov.dump_partition(model, 0) |> MapSet.new
@@ -91,23 +91,24 @@ defmodule MarkovTest do
   end
 
   test "generation" do
-    File.rm_rf("./test/model_generation")
-    {:ok, model} = Markov.load("test", "model_generation")
+    File.rm_rf("./test/model")
+    {:ok, model} = Markov.load("test", "model")
     assert Markov.train(model, "a b c d") == {:ok, :done}
     assert Markov.generate_text(model) == {:ok, "a b c d"}
     Markov.unload(model)
   end
 
   test "probability correctness" do
-    File.rm_rf("./test/model_generation")
-    {:ok, model} = Markov.load("test", "model_generation")
+    File.rm_rf("./test/model")
+    {:ok, model} = Markov.load("test", "model")
 
     assert Markov.train(model, "1") == {:ok, :done}
     assert Markov.train(model, "2") == {:ok, :done}
 
-    {one, two} = Enum.reduce(1..500, {0, 0}, fn _, {one, two} ->
-      if Markov.generate_text(model) == {:ok, "1"}, do: {one + 1, two}, else: {one, two + 1}
-    end)
+    %{{:ok, "1"} => one, {:ok, "2"} => two} =
+      0..499
+      |> Enum.map(fn _ -> Markov.generate_text(model) end)
+      |> Enum.frequencies
     assert one >= 225 and one <= 275
     assert two >= 225 and two <= 275
     assert one + two == 500
@@ -116,8 +117,8 @@ defmodule MarkovTest do
   end
 
   test "log reading" do
-    File.rm_rf("./test/model_log")
-    {:ok, model} = Markov.load("test", "model_log")
+    File.rm_rf("./test/model")
+    {:ok, model} = Markov.load("test", "model")
 
     assert Markov.train(model, "1") == {:ok, :done}
     assert Markov.generate_text(model) == {:ok, "1"}

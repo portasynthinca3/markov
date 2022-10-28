@@ -8,5 +8,5 @@ erl_crash.dump
 markov-*.tar
 /tmp/
 /.elixir_ls/
-/test/model_*/
+/test/model*/
 /dict.csv

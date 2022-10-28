@@ -3,8 +3,8 @@ defmodule TagTest do
   import Markov
 
   test "simple tag query" do
-    File.rm_rf("./test/model_tq")
-    {:ok, model} = load("./test", "model_tq")
+    File.rm_rf("./test/model")
+    {:ok, model} = load("./test", "model")
 
     assert train(model, "1", [:one]) == {:ok, :done}
     assert train(model, "2", [:two]) == {:ok, :done}
@@ -15,8 +15,8 @@ defmodule TagTest do
   end
 
   test ":not tag query" do
-    File.rm_rf("./model_tq")
-    {:ok, model} = load("./test", "model_tq")
+    File.rm_rf("./model")
+    {:ok, model} = load("./test", "model")
 
     assert train(model, "1", [:one]) == {:ok, :done}
     assert train(model, "2", [:two]) == {:ok, :done}
@@ -27,8 +27,8 @@ defmodule TagTest do
   end
 
   test ":or tag query" do
-    File.rm_rf("./model_tq")
-    {:ok, model} = load("./test", "model_tq")
+    File.rm_rf("./model")
+    {:ok, model} = load("./test", "model")
 
     assert train(model, "1", [:one]) == {:ok, :done}
     assert train(model, "2", [:two]) == {:ok, :done}
