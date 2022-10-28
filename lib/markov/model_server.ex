@@ -35,7 +35,7 @@ defmodule Markov.ModelServer do
       ring: %HashRing{},       # current ring during normal operation, old ring during a repartition
       new_ring: nil,           # inactive during normal operation, new ring during a repartition
       options: [],             # configured options
-      repartition_status: %{}, # map of partition statuses during a repartition
+      repartition_status: nil, # map of partition statuses during a repartition
       repartition_backlog: [], # training operations deferred until repartitioning is complete
       total_links: 0,          # total links across all partitions
       open_partitions: %{},    # map of currently loaded partitions to timeout process PIDs
@@ -46,8 +46,8 @@ defmodule Markov.ModelServer do
       ring: HashRing.t(),
       new_ring: HashRing.t() | nil,
       options: [Markov.model_option()],
-      repartition_status: %{},
-      repartition_backlog: [[term()]],
+      repartition_status: %{term() => non_neg_integer()} | nil,
+      repartition_backlog: [{[term()], [term()]}],
       total_links: non_neg_integer(),
       open_partitions: %{non_neg_integer() => pid()},
       log_handle: File.io_device()
@@ -160,16 +160,30 @@ defmodule Markov.ModelServer do
   end
 
   @spec handle_call(request :: {:train, [term()], [term()]}, from :: term(), state :: State.t()) :: {:reply, term(), State.t()}
-  def handle_call({:train, tokens, specifiers}, _, state) do
+  def handle_call({:train, tokens, tags}, _, state) do
     # check if a repartition is in progress
-    if map_size(state.repartition_status) > 0 do
+    if state.repartition_status != nil do
       write_log_entry(state, :train_deferred, tokens)
       {:reply, {:ok, :deferred}, %State{state |
-        repartition_backlog: [tokens | state.repartition_backlog]}}
+        repartition_backlog: [{tokens, tags} | state.repartition_backlog]}}
     else
-      state = ModelActions.train(state, tokens, specifiers)
+      state = ModelActions.train(state, tokens, tags)
       write_log_entry(state, :train, tokens)
-      {:reply, {:ok, :done}, state}
+
+      current_parts = length(HashRing.nodes(state.ring))
+      max_links = current_parts * state.options[:partition_size]
+
+      if state.total_links > max_links do
+        # begin repartitioning
+        state = %{state |
+          new_ring: HashRing.add_node(state.ring, current_parts),
+          repartition_status: %{}
+        }
+        write_log_entry(state, :repart_start, current_parts)
+        {:reply, {:ok, :done}, state, {:continue, {:repart, 0}}}
+      else
+        {:reply, {:ok, :done}, state}
+      end
     end
   end
 
@@ -190,6 +204,85 @@ defmodule Markov.ModelServer do
   def handle_info({:EXIT, _pid, :normal}, state), do: {:noreply, state}
 
   # Internal functions
+
+  @spec handle_continue({:repart, non_neg_integer() | :cleanup}, State.t())
+    :: {:noreply, State.t(), {:continue, {:repart, non_neg_integer()}}}
+     | {:noreply, State.t()}
+  def handle_continue({:repart, part}, state) when is_integer(part) do
+    state = open_partition!(state, part)
+    table = {:partition, state.name, part}
+
+    state = traverse_partition(state, part, :dets.first(table))
+
+    current_parts = length(HashRing.nodes(state.ring))
+    next_part = part + 1
+    if next_part >= current_parts do
+      {:noreply, state, {:continue, {:repart, :cleanup}}}
+    else
+      {:noreply, state, {:continue, {:repart, next_part}}}
+    end
+  end
+
+  def handle_continue({:repart, :cleanup}, state) do
+    log(state, "repart: cleaning up")
+
+    # remove old links
+    _ = Enum.reduce(state.repartition_status, state, fn {key, _}, state ->
+      old_part = HashRing.key_to_node(state.ring, key)
+      state = open_partition!(state, old_part)
+      send(Map.get(state.open_partitions, old_part), :defer)
+
+      :dets.delete({:partition, state.name, old_part}, key)
+      log(state, "repart: deleted #{inspect key} from #{old_part}")
+
+      state
+    end)
+
+    # update state
+    moved_links = map_size(state.repartition_status)
+    state = %{state |
+      new_ring: nil,
+      repartition_status: nil,
+      ring: state.new_ring,
+    }
+
+    # work through the backlog
+    state = Enum.reduce(state.repartition_backlog, state, fn {tokens, tags}, state ->
+      log(state, "repart: training #{inspect tokens} #{inspect tags}")
+      ModelActions.train(state, tokens, tags)
+    end)
+
+    write_log_entry(state, :repart_done, %{
+      moved_links: moved_links,
+      moved_links_percent: moved_links * 100.0 / state.total_links
+    })
+    {:noreply, %{state | repartition_backlog: []}}
+  end
+
+  @spec traverse_partition(State.t(), non_neg_integer(), [term()] | :"$end_of_table") :: State.t()
+  defp traverse_partition(state, _part, :"$end_of_table"), do: state
+  defp traverse_partition(state, part, key) do
+    state = open_partition!(state, part)
+    send(Map.get(state.open_partitions, part), :defer)
+    table = {:partition, state.name, part}
+
+    new_part = HashRing.key_to_node(state.new_ring, key)
+    state = if new_part != part do
+      state = open_partition!(state, new_part)
+      send(Map.get(state.open_partitions, new_part), :defer)
+      new_table = {:partition, state.name, new_part}
+
+      objects = :dets.lookup(table, key)
+      for object <- objects, do: :dets.insert(new_table, object)
+
+      log(state, "repart: copied #{inspect key} #{part} -> #{new_part}")
+
+      %{state | repartition_status: Map.put(state.repartition_status, key, new_part)}
+    else state end
+
+    next_key = :dets.next(table, key)
+    traverse_partition(state, part, next_key)
+  end
 
   @spec write_log_entry(state :: State.t(), type :: Markov.log_entry_type(), data:: term()) :: :ok | :ignored
   defp write_log_entry(state, type, data) do
