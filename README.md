@@ -19,7 +19,7 @@ Text generation library based on nth-order Markov chains
 In `mix.exs`:
 ```elixir
 defp deps do
-  [{:markov, "~> 2.0"}]
+  [{:markov, "~> 2.1"}]
 end
 ```
 

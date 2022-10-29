@@ -6,6 +6,8 @@ defmodule Markov.ModelActions do
 
   alias Markov.ModelServer.State
   import Markov.ModelServer, only: [open_partition!: 2]
+  import Nx.Defn
+  @nx_batch_size 1024
 
   # WARNING: match specifications ahead
 
@@ -113,6 +115,7 @@ defmodule Markov.ModelActions do
     case :dets.select(table, tq2ms(current, tag_query)) do
       [] -> {:error, {:no_matches, current}, state}
       rows ->
+        rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows
         scores = process_scores(current, rows, tag_query, table)
         rows = rows |> Enum.map(fn {to, frequency} ->
           score = Map.get(scores, to, 0) + 1
@@ -133,5 +136,107 @@ defmodule Markov.ModelActions do
     else
       probabilistic_select(number, tail, sum, acc + add)
     end
+  end
+
+  @doc "Adjusts the probability of one connection"
+  defn adjust_one_prob(param_tensor) do
+    i          = Nx.gather(param_tensor, Nx.tensor([[0]])) |> Nx.squeeze
+    peak       = Nx.gather(param_tensor, Nx.tensor([[1]])) |> Nx.squeeze
+    peak_prob  = Nx.gather(param_tensor, Nx.tensor([[2]])) |> Nx.squeeze
+    first_prob = Nx.gather(param_tensor, Nx.tensor([[3]])) |> Nx.squeeze
+    ratio      = Nx.gather(param_tensor, Nx.tensor([[4]])) |> Nx.squeeze
+    len        = Nx.gather(param_tensor, Nx.tensor([[5]])) |> Nx.squeeze
+
+    # linear approximation
+    # result = cond do
+    #   i < peak ->
+    #     a = peak_prob / ratio
+    #     k = (peak_prob - a) / peak
+    #     k * i + a
+    #
+    #   i == peak -> peak_prob
+    #
+    #   i > peak ->
+    #     last = len - 1
+    #     peak_to_last = last - peak
+    #     k = -Nx.min((ratio - 1) / peak_to_last, peak_prob / peak_to_last)
+    #     a = -k + peak_prob
+    #     k * i + a
+    #
+    #   # hopefully never reached
+    #   true -> Nx.Constants.nan
+    # end
+
+    power = Nx.tensor(1.7, type: :f32)
+
+    # https://www.desmos.com/calculator/mq3qjg8zpm
+    result = cond do
+      i < peak ->
+        offset = (first_prob / (ratio ** power))
+        coeff = (peak_prob - (peak_prob * ratio / (ratio ** power + 1))) / (peak ** ratio)
+        (coeff * (i ** ratio)) + offset
+
+      i == peak -> peak_prob
+
+      i > peak ->
+        coeff = peak_prob / ((len - peak) ** (1 / ratio))
+        coeff * ((-i + len - 1) ** (1 / ratio))
+
+      # hopefully never reached
+      true -> Nx.Constants.nan
+    end
+
+    # round off and convert scalar to {1}-shape
+    Nx.round(result) |> Nx.tile([1])
+  end
+
+  @doc "Adjust the probabilities of a batch of connections"
+  defn adjust_batch_probs(params) do
+    results = Nx.iota({@nx_batch_size}, type: :u32) |> Nx.map(fn _ -> -1 end)
+
+    {_, _, results} = while {i = 0, params, results}, i < @nx_batch_size do
+      result = adjust_one_prob(params[i])
+        |> Nx.as_type(:u32)
+
+      i_from_params = Nx.gather(params[i], Nx.tensor([[0]]))
+        |> Nx.squeeze
+        |> Nx.as_type(:u32)
+
+      {i + 1, params, Nx.put_slice(results, [i_from_params], result)}
+    end
+
+    results
+  end
+
+  @spec apply_shifting([{[term()], non_neg_integer()}])
+    :: [{[term()], non_neg_integer()}]
+  defp apply_shifting(rows) do
+    # sort rows by their probability
+    rows = Enum.sort(rows, fn {_, foo}, {_, bar} -> foo > bar end)
+
+    # choose the peak
+    min_allowed = if length(rows) == 1, do: 0, else: 1
+    peak = max(min_allowed, :math.sqrt(length(rows)) * 0.1) |> floor()
+    {_, peak_prob} = rows |> Enum.at(peak)
+    # determine by how much the first most probable path is more likely than
+    # the peak
+    {_, first_prob} = rows |> Enum.at(0)
+    ratio = min(first_prob / peak_prob, 5)
+
+    jitted = EXLA.jit(&Markov.ModelActions.adjust_batch_probs/1)
+    constant_params = [peak, peak_prob, first_prob, ratio, length(rows)]
+
+    Stream.with_index(rows)
+      |> Stream.chunk_every(@nx_batch_size)
+      |> Stream.flat_map(fn batch ->
+        processed = batch
+          |> Enum.map(&elem(&1, 1))
+          |> Enum.map(fn idx -> [idx | constant_params] end)
+          |> Nx.tensor(type: :f32)
+          |> jitted.()
+          |> Nx.to_flat_list
+        Enum.zip(batch, processed) |> Enum.map(fn {{{k, _}, _}, v} -> {k, v} end)
+      end)
+      |> Enum.into([])
   end
 end
