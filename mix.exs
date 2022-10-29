@@ -16,7 +16,13 @@ defmodule Markov.MixProject do
         extras: ["README.md"],
         logo: "logo/logo.png",
         assets: "doc_assets"
-      ]
+      ],
+      test_coverage: [ignore_modules: [
+        Markov.ModelServer.State,
+        Markov.Sup,
+        Markov.PartTimeout
+      ]],
+      aliases: ["test.ci": ["test --color --max-cases 10"]]
     ]
   end
 

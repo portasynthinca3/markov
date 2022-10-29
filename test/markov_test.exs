@@ -134,4 +134,25 @@ defmodule MarkovTest do
 
     Markov.unload(model)
   end
+
+  test "repartition integrity" do
+    training_data = [
+      "asd sdf dfg fgh ghj hjk jkl kl",
+      "a s d f g h j k l",
+      "as sd df fg gh hj jk kl",
+      "qwe wer ert rty tyu yui uio iop",
+      "q w e r t y u i o p",
+      "qw we er rt ty yu ui io op"
+    ]
+
+    File.rm_rf("./test/model")
+    {:ok, model} = Markov.load("test", "model", partition_size: 10)
+
+    for str <- training_data, do:
+      assert Markov.train(model, str) == {:ok, :done}
+    for _ <- 0..499, do:
+      assert :erlang.element(2, Markov.generate_text(model)) in training_data
+
+    Markov.unload(model)
+  end
 end

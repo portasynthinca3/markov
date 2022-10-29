@@ -15,7 +15,7 @@ defmodule TagTest do
   end
 
   test ":not tag query" do
-    File.rm_rf("./model")
+    File.rm_rf("./test/model")
     {:ok, model} = load("./test", "model")
 
     assert train(model, "1", [:one]) == {:ok, :done}
@@ -27,7 +27,7 @@ defmodule TagTest do
   end
 
   test ":or tag query" do
-    File.rm_rf("./model")
+    File.rm_rf("./test/model")
     {:ok, model} = load("./test", "model")
 
     assert train(model, "1", [:one]) == {:ok, :done}
@@ -37,6 +37,16 @@ defmodule TagTest do
     assert generate_text(model, {:one, :or, :three}) in [{:ok, "1"}, {:ok, "3"}]
     assert generate_text(model, {:two, :or, :three}) in [{:ok, "2"}, {:ok, "3"}]
     assert generate_text(model, {:two, :or, :four}) in [{:ok, "2"}, {:ok, "4"}]
+
+    unload(model)
+  end
+
+  test "unknown tag" do
+    File.rm_rf("./test/model")
+    {:ok, model} = load("./test", "model")
+
+    assert train(model, "1", [:one]) == {:ok, :done}
+    assert generate_text(model, :two) == {:error, {:no_matches, [:start, :start]}}
 
     unload(model)
   end
