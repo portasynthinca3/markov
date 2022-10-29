@@ -52,7 +52,8 @@ defmodule Markov do
   @typedoc """
   Model options that could be set during creation in a call to `load/3`
   or with `configure/2`:
-    - `store_history`: determines what data to put in the operation log, `[]` by default:
+    - `store_history`: determines what data to put in the operation log, all of them
+    by default:
       - `:train`: training requests
       - `:train_deferred`: training requests that have been deferred to until after
       repartitioning is complete
