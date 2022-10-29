@@ -237,7 +237,6 @@ defmodule Markov do
       {:ok, "hello Elixir"}
       iex> Markov.generate_text(model, {true, :score, [:uppercase]})
       {:ok, "hello earth"}
-
   """
   @type tag_query() ::
     true |
@@ -312,5 +311,11 @@ defmodule Markov do
     # the server opens the table for us
     {:ok, dets_table} = GenServer.call(model, {:prepare_dump_info, part_no})
     :dets.match(dets_table, :"$1") |> Enum.map(fn [x] -> x end)
+  end
+
+  @doc "Deletes model data. There's no going back :)"
+  @spec nuke(model :: model_reference()) :: :ok
+  def nuke(model) do
+    GenServer.call(model, :nuke)
   end
 end

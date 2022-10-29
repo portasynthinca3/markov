@@ -194,6 +194,26 @@ defmodule Markov.ModelServer do
     {:reply, result, state}
   end
 
+  @spec handle_call(request :: :nuke, from :: term(), state :: State.t()) :: :ok
+  def handle_call(:nuke, _, state) do
+    state.ring |> HashRing.nodes() |> Enum.map(fn part ->
+      table = {:partition, state.name, part}
+      :dets.close(table)
+      path = Path.join(state.path, "part_#{part}.dets")
+      File.rm(path)
+    end)
+
+    Path.join(state.path, "operation_log.csetf") |> File.rm()
+    state = %State{
+      name: state.name,
+      path: state.path,
+      options: state.options,
+      log_handle: state.log_handle
+    }
+
+    {:reply, :ok, state}
+  end
+
   @spec handle_info({:unload_part, integer()}, State.t()) :: {:noreply, State.t()}
   def handle_info({:unload_part, num}, state) do
     state = close_partition!(state, num)

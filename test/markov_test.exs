@@ -155,4 +155,15 @@ defmodule MarkovTest do
 
     Markov.unload(model)
   end
+
+  test "nuking" do
+    File.rm_rf("./test/model")
+    {:ok, model} = Markov.load("test", "model")
+
+    assert Markov.train(model, "hello world") == {:ok, :done}
+    assert Markov.nuke(model) == :ok
+    assert Markov.dump_partition(model, 0) == []
+
+    Markov.unload(model)
+  end
 end
