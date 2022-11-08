@@ -4,7 +4,7 @@ defmodule Markov.MixProject do
   def project do
     [
       app: :markov,
-      version: "2.2.0",
+      version: "2.2.1",
       elixir: "~> 1.12",
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
@@ -54,7 +54,7 @@ defmodule Markov.MixProject do
   defp package do
     [
       name: :markov,
-      files: ["lib", "mix.exs", "README*", "LICENSE*"],
+      files: ["lib", "mix.exs", "README*", "LICENSE*", "priv/*"],
       maintainers: ["portasynthinca3"],
       licenses: ["WTFPL"],
       links: %{"GitHub" => "https://github.com/portasynthinca3/markov"}
