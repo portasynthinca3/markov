@@ -156,6 +156,7 @@ defmodule MarkovTest do
     Markov.unload(model)
   end
 
+  @tag :nuke
   test "nuking" do
     File.rm_rf("./test/model")
     {:ok, model} = Markov.load("test", "model")

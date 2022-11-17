@@ -208,8 +208,9 @@ defmodule Markov.ModelServer do
       name: state.name,
       path: state.path,
       options: state.options,
-      log_handle: state.log_handle
-    }
+      log_handle: state.log_handle,
+      ring: HashRing.add_node(%HashRing{}, 0)
+    } |> open_partition!(0)
 
     {:reply, :ok, state}
   end
