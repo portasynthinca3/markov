@@ -172,6 +172,7 @@ defmodule Markov do
     train(model, tokens, tags)
   end
   def train(model, tokens, tags) when is_list(tokens) do
+    tags = if tags == [], do: [:"$none"], else: tags
     GenServer.call(model, {:train, tokens, tags})
   end
 

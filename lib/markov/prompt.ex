@@ -39,16 +39,15 @@ defmodule Markov.Prompt do
   Assuming your application receives a stream of strings, call this function
   instead of `Markov.train/3` with the current and last string
   """
-  @spec train(model :: Markov.model_reference(), new_text :: String.t(), last_text :: String.t() | nil)
+  @spec train(model :: Markov.model_reference(), new_text :: String.t(),
+    last_text :: String.t() | nil, tags :: [any()])
     :: {:ok, :done | :deferred} | {:error, term()}
-  def train(model, new_text, last_text \\ nil) do
-    if last_text do
-      tags = generate_tags(last_text)
-        |> Enum.map(fn {token, _score} -> token end)
-      Markov.train(model, new_text, tags)
-    else
-      Markov.train(model, new_text)
-    end
+  def train(model, new_text, last_text \\ nil, tags \\ []) do
+    tags = if last_text do
+      generate_tags(last_text) |> Enum.map(fn {token, _score} -> token end)
+    else [] end ++ tags
+
+    Markov.train(model, new_text, tags)
   end
 
   @doc """
