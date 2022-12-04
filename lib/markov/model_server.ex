@@ -38,7 +38,7 @@ defmodule Markov.ModelServer do
       repartition_status: nil, # map of partition statuses during a repartition
       repartition_backlog: [], # training operations deferred until repartitioning is complete
       total_links: 0,          # total links across all partitions
-      open_partitions: %{},    # map of currently loaded partitions to timeout process PIDs
+      open_partitions: %{},    # map of currently loaded partitions to ets talbes and timeout process PIDs
       log_handle: nil,         # log file handle (append mode)
     ]
     @type t :: %__MODULE__{
@@ -49,7 +49,7 @@ defmodule Markov.ModelServer do
       repartition_status: %{term() => non_neg_integer()} | nil,
       repartition_backlog: [{[term()], [term()]}],
       total_links: non_neg_integer(),
-      open_partitions: %{non_neg_integer() => pid()},
+      open_partitions: %{non_neg_integer() => {:ets.tid(), pid()}},
       log_handle: File.io_device()
     }
   end
@@ -153,10 +153,11 @@ defmodule Markov.ModelServer do
     {:reply, Path.join(state.path, "operation_log.csetf"), state}
   end
 
-  @spec handle_call(request :: {:prepare_dump_info, integer}, from :: term(), state :: State.t()) :: {:reply, String.t(), State.t()}
+  @spec handle_call(request :: {:prepare_dump_info, integer}, from :: term(), state :: State.t()) :: {:reply, term(), State.t()}
   def handle_call({:prepare_dump_info, part}, _, state) do
     state = open_partition!(state, part)
-    {:reply, {:ok, {:partition, state.name, part}}, state}
+    {tid, _} = Map.get(state.open_partitions, part)
+    {:reply, {:ok, tid}, state}
   end
 
   @spec handle_call(request :: {:train, [term()], [term()]}, from :: term(), state :: State.t()) :: {:reply, term(), State.t()}
@@ -197,7 +198,7 @@ defmodule Markov.ModelServer do
   @spec handle_call(request :: :nuke, from :: term(), state :: State.t()) :: :ok
   def handle_call(:nuke, _, state) do
     state.ring |> HashRing.nodes() |> Enum.map(fn part ->
-      table = {:partition, state.name, part}
+      {table, _} = Map.get(state.open_partitions, part)
       :dets.close(table)
       path = Path.join(state.path, "part_#{part}.dets")
       File.rm(path)
@@ -231,9 +232,9 @@ defmodule Markov.ModelServer do
      | {:noreply, State.t()}
   def handle_continue({:repart, part}, state) when is_integer(part) do
     state = open_partition!(state, part)
-    table = {:partition, state.name, part}
+    {table, _} = Map.get(state.open_partitions, part)
 
-    state = traverse_partition(state, part, :dets.first(table))
+    state = traverse_partition(state, part, :ets.first(table))
 
     current_parts = length(HashRing.nodes(state.ring))
     next_part = part + 1
@@ -251,9 +252,10 @@ defmodule Markov.ModelServer do
     _ = Enum.reduce(state.repartition_status, state, fn {key, _}, state ->
       old_part = HashRing.key_to_node(state.ring, key)
       state = open_partition!(state, old_part)
-      send(Map.get(state.open_partitions, old_part), :defer)
+      {table, timeout_pid} = Map.get(state.open_partitions, old_part)
+      send(timeout_pid, :defer)
 
-      :dets.delete({:partition, state.name, old_part}, key)
+      :ets.delete(table, key)
       log(state, "repart: deleted #{inspect key} from #{old_part}")
 
       state
@@ -284,24 +286,24 @@ defmodule Markov.ModelServer do
   defp traverse_partition(state, _part, :"$end_of_table"), do: state
   defp traverse_partition(state, part, key) do
     state = open_partition!(state, part)
-    send(Map.get(state.open_partitions, part), :defer)
-    table = {:partition, state.name, part}
+    {table, timeout_pid} = Map.get(state.open_partitions, part)
+    send(timeout_pid, :defer)
 
     new_part = HashRing.key_to_node(state.new_ring, key)
     state = if new_part != part do
       state = open_partition!(state, new_part)
-      send(Map.get(state.open_partitions, new_part), :defer)
-      new_table = {:partition, state.name, new_part}
+      {new_table, new_to_pid} = Map.get(state.open_partitions, new_part)
+      send(new_to_pid, :defer)
 
-      objects = :dets.lookup(table, key)
-      for object <- objects, do: :dets.insert(new_table, object)
+      objects = :ets.lookup(table, key)
+      for object <- objects, do: :ets.insert(new_table, object)
 
       log(state, "repart: copied #{inspect key} #{part} -> #{new_part}")
 
       %{state | repartition_status: Map.put(state.repartition_status, key, new_part)}
     else state end
 
-    next_key = :dets.next(table, key)
+    next_key = :ets.next(table, key)
     traverse_partition(state, part, next_key)
   end
 
@@ -370,16 +372,21 @@ defmodule Markov.ModelServer do
       state
     else
       file = Path.join(state.path, "part_#{num}.dets") |> :erlang.binary_to_list
-      {:ok, _} = :dets.open_file({:partition, state.name, num}, file: file, ram_file: true, type: :bag)
+      {:ok, _} = :dets.open_file({:partition, state.name, num}, file: file, type: :bag)
+      tid = :ets.new(:partition, [:bag, :public])
+      ^tid = :dets.to_ets({:partition, state.name, num}, tid)
       pid = Markov.PartTimeout.start_link(self(), state.options[:partition_timeout], num)
       log(state, "opened partition #{num}")
-      %State{state | open_partitions: Map.put(state.open_partitions, num, pid)}
+      %State{state | open_partitions: Map.put(state.open_partitions, num, {tid, pid})}
     end
   end
 
   @spec close_partition!(state :: State.t(), num :: integer()) :: State.t()
   defp close_partition!(state, num) do
+    {tid, _} = Map.get(state.open_partitions, num)
+    :ets.to_dets(tid, {:partition, state.name, num})
     :ok = :dets.close({:partition, state.name, num})
+    :ets.delete(tid)
     log(state, "closed partition #{num}")
     %State{state | open_partitions: Map.delete(state.open_partitions, num)}
   end

@@ -35,7 +35,7 @@ defmodule Markov.ModelActions do
         [tq2msc(query)],
         [:"$2"]
       }]
-      {:dets.select(table, ms) |> MapSet.new, score}
+      {:ets.select(table, ms) |> MapSet.new, score}
     end
 
     rows_tos = MapSet.new(for {to, _} <- rows, do: to)
@@ -66,15 +66,15 @@ defmodule Markov.ModelActions do
 
       partition = HashRing.key_to_node(state.ring, from)
       state = open_partition!(state, partition) # doesn't do anything if already open
-      send(Map.get(state.open_partitions, partition), :defer) # signal usage
+      {table, timeout_pid} = Map.get(state.open_partitions, partition)
+      send(timeout_pid, :defer) # signal usage
 
       for tag <- tags do
-        table = {:partition, state.name, partition}
-        case :dets.match(table, {from, tag, to, :"$1"}) do
-          [] -> :dets.insert(table, {from, tag, to, 1})
+        case :ets.match(table, {from, tag, to, :"$1"}) do
+          [] -> :ets.insert(table, {from, tag, to, 1})
           [[previous]] ->
-            :dets.match_delete(table, {from, tag, to, previous})
-            :dets.insert(table, {from, tag, to, previous + 1})
+            :ets.match_delete(table, {from, tag, to, previous})
+            :ets.insert(table, {from, tag, to, previous + 1})
         end
       end
       %{state | total_links: state.total_links + 1}
@@ -108,11 +108,11 @@ defmodule Markov.ModelActions do
     else current end
 
     partition = HashRing.key_to_node(state.ring, current)
+    {table, timeout_pid} = Map.get(state.open_partitions, partition)
     state = open_partition!(state, partition)
-    send(Map.get(state.open_partitions, partition), :defer)
+    send(timeout_pid, :defer)
 
-    table = {:partition, state.name, partition}
-    case :dets.select(table, tq2ms(current, tag_query)) do
+    case :ets.select(table, tq2ms(current, tag_query)) do
       [] -> {:error, {:no_matches, current}, state}
       rows ->
         rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows

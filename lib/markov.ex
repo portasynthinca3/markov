@@ -307,11 +307,11 @@ defmodule Markov do
   end
 
   @doc "Reads an entire partition for debugging purposes"
-  @spec dump_partition(model_reference(), integer()) :: [{{term(), term()}, %{term() => integer()}}]
+  @spec dump_partition(model_reference(), integer()) :: [{[term()], term(), term(), integer()}]
   def dump_partition(model, part_no) do
     # the server opens the table for us
-    {:ok, dets_table} = GenServer.call(model, {:prepare_dump_info, part_no})
-    :dets.match(dets_table, :"$1") |> Enum.map(fn [x] -> x end)
+    {:ok, tid} = GenServer.call(model, {:prepare_dump_info, part_no})
+    :ets.match(tid, :"$1") |> Enum.map(fn [x] -> x end)
   end
 
   @doc "Deletes model data. There's no going back :)"
