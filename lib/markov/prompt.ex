@@ -72,10 +72,10 @@ defmodule Markov.Prompt do
   @doc """
   Generates the text from a prompt
   """
-  @spec generate_prompted(model :: Markov.model_reference(), prompt :: String.t()) ::
-    {:ok, String.t()} | {:error, term()}
-  def generate_prompted(model, prompt) do
+  @spec generate_prompted(model :: Markov.model_reference(), prompt :: String.t(),
+    query :: Markov.tag_query()) :: {:ok, String.t()} | {:error, term()}
+  def generate_prompted(model, prompt, tag_query \\ true) do
     tags = generate_tags(prompt)
-    Markov.generate_text(model, {true, :score, tags})
+    Markov.generate_text(model, {tag_query, :score, tags})
   end
 end

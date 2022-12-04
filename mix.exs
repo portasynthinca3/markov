@@ -4,7 +4,7 @@ defmodule Markov.MixProject do
   def project do
     [
       app: :markov,
-      version: "2.3.0",
+      version: "2.4.0",
       elixir: "~> 1.12",
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
