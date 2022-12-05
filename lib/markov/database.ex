@@ -8,7 +8,7 @@ defdatabase Markov.Database do
     }
   end
 
-  deftable Link, [:mod_from, :tag, :to], type: :bag, fragmentation: [number: 128] do
+  deftable Link, [:mod_from, :tag, :to], type: :bag do
     @type t :: %Link{
       mod_from: {term(), [term()]},   # model name and link source ("from")
       tag: term(),                    # tag
@@ -16,7 +16,7 @@ defdatabase Markov.Database do
     }
   end
 
-  deftable Weight, [:link, :value], type: :set, fragmentation: [number: 128] do
+  deftable Weight, [:link, :value], type: :set do
     @type t :: %Weight{link: Link.t(), value: non_neg_integer()}
   end
 

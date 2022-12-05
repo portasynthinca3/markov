@@ -20,11 +20,11 @@ defmodule MarkovTest do
   test "configuration persistence" do
     Markov.nuke("model")
     {:ok, model} = Markov.load("model")
-    Markov.configure(model, partition_size: 7500)
+    Markov.configure(model, shift_probabilities: true)
     Markov.unload(model)
     {:ok, model} = Markov.load("model")
     {:ok, config} = Markov.get_config(model)
-    assert config[:partition_size] == 7500
+    assert config[:shift_probabilities] == true
     Markov.unload(model)
   end
 
@@ -86,6 +86,27 @@ defmodule MarkovTest do
       %Weight{link: %Link{mod_from: {"model", ["a", "b", "c", "d", "e"]}, tag: :"$none", to: :end}, value: 1},
     ])
     assert MapSet.equal?(tokens, reference)
+    Markov.unload(model)
+
+
+    {:ok, model} = Markov.load("test")
+    :ok = Markov.train(model, "hello world")
+    Markov.generate_text(model)
+    Markov.unload(model)
+    :mnesia.stop
+    :mnesia.start
+    :mnesia.wait_for_tables([Link, Weight, Markov.Database.Master], 1500)
+    {:ok, model} = Markov.load("test")
+    Markov.generate_text(model)
+  end
+
+  test "data persistence" do
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model")
+    :ok = Markov.train(model, "hello world")
+    Markov.unload(model)
+    {:ok, model} = Markov.load("model")
+    assert Markov.generate_text(model) == {:ok, "hello world"}
     Markov.unload(model)
   end
 

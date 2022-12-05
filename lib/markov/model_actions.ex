@@ -69,15 +69,10 @@ defmodule Markov.ModelActions do
         else from end
 
         mf = {state.name, from}
-        Amnesia.ets do
+        Amnesia.async do
           for tag <- tags do
-            link = %Link{mod_from: mf, tag: tag, to: to} |> Link.write
+            link = %Link{mod_from: mf, tag: tag, to: to} |> Link.write!
             :mnesia.dirty_update_counter(Weight, link, 1)
-            # prev_val = case Weight.read(link, :write) do
-            #   nil -> 0
-            #   %Weight{value: val} -> val
-            # end
-            # %Weight{link: link, value: prev_val + 1} |> Weight.write
           end
         end
       end)
