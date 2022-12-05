@@ -91,6 +91,8 @@ defmodule Markov.ModelServer do
     {:reply, result, state}
   end
 
+  def handle_info({:EXIT, pid, :normal}, state) when is_pid(pid), do: {:noreply, state}
+
   # Internal functions
 
   @spec write_log_entry(state :: State.t(), type :: Markov.log_entry_type(), data :: term()) :: :ok | :ignored

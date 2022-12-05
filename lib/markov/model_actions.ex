@@ -6,7 +6,7 @@ defmodule Markov.ModelActions do
 
   alias Markov.ModelServer.State
   use Amnesia
-  alias Markov.Database.{Link, Master, Operation}
+  alias Markov.Database.{Link, Master, Operation, Weight}
   import Nx.Defn
   @nx_batch_size 1024
 
@@ -15,9 +15,9 @@ defmodule Markov.ModelActions do
   @doc "tag query to match specification"
   @spec tq2ms({term(), [term()]}, Markov.tag_query()) :: :ets.match_spec()
   def tq2ms(mf, query), do: [{
-    {Link, mf, :"$1", :"$2", :"$3"},
+    {Link, mf, :"$1", :"$2"},
     [tq2msc(query)],
-    [{{:"$2", :"$3"}}]
+    [{{:"$1", :"$2"}}]
   }]
 
   @doc "tag query to match spec condition"
@@ -32,7 +32,7 @@ defmodule Markov.ModelActions do
   def process_scores(mf, rows, {_, :score, queries}) do
     to_sets = for {query, score} <- queries do
       ms = [{
-        {Link, mf, :"$1", :"$2", :_},
+        {Link, mf, :"$1", :"$2"},
         [tq2msc(query)],
         [:"$2"]
       }]
@@ -57,28 +57,31 @@ defmodule Markov.ModelActions do
     order = state.options[:order]
     tokens = Enum.map(0..(order - 1), fn _ -> :start end) ++ tokens ++ [:end]
 
-    Markov.ListUtil.overlapping_stride(tokens, order + 1) |> Enum.map(fn bit ->
-      from = Enum.slice(bit, 0..-2)
-      to = Enum.at(bit, -1)
+    Markov.ListUtil.overlapping_stride(tokens, order + 1)
+      |> Flow.from_enumerable
+      |> Flow.map(fn bit ->
+        from = Enum.slice(bit, 0..-2)
+        to = Enum.at(bit, -1)
 
-      # sanitize tokens
-      from = if state.options[:sanitize_tokens] do
-        Enum.map(from, &Markov.TextUtil.sanitize_token/1)
-      else from end
+        # sanitize tokens
+        from = if state.options[:sanitize_tokens] do
+          Enum.map(from, &Markov.TextUtil.sanitize_token/1)
+        else from end
 
-      mf = {state.name, from}
-      Amnesia.transaction do
-        for tag <- tags do
-          case Link.match(mod_from: mf, tag: tag, to: to, occurrences: :_) |> Amnesia.Selection.values do
-            [] ->
-              %Link{mod_from: mf, tag: tag, to: to, occurrences: 1} |> Link.write
-            [%Link{} = prev] ->
-              prev |> Link.delete()
-              %Link{prev | occurrences: prev.occurrences + 1} |> Link.write
+        mf = {state.name, from}
+        Amnesia.ets do
+          for tag <- tags do
+            link = %Link{mod_from: mf, tag: tag, to: to} |> Link.write
+            :mnesia.dirty_update_counter(Weight, link, 1)
+            # prev_val = case Weight.read(link, :write) do
+            #   nil -> 0
+            #   %Weight{value: val} -> val
+            # end
+            # %Weight{link: link, value: prev_val + 1} |> Weight.write
           end
         end
-      end
-    end)
+      end)
+      |> Flow.run
 
     :ok
   end
@@ -110,10 +113,14 @@ defmodule Markov.ModelActions do
     else current end
 
     mf = {state.name, current}
-    Amnesia.transaction do
+    Amnesia.ets do
       case Link.select(tq2ms(mf, tag_query)) |> Amnesia.Selection.values do
         [] -> {:error, {:no_matches, current}, state}
         rows ->
+          rows = rows |> Enum.map(fn {tag, to} ->
+            %Weight{value: frequency} = Weight.read(%Link{mod_from: mf, tag: tag, to: to})
+            {to, frequency}
+          end)
           rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows
           scores = process_scores(mf, rows, tag_query)
           rows = rows |> Enum.map(fn {to, frequency} ->
@@ -245,13 +252,15 @@ defmodule Markov.ModelActions do
     # WARNING: matchspec ahead
     Amnesia.transaction do
       Link.select([{
-        {Link, {name, :_}, :_, :_, :_},
-        [{:==, 1, 1}],
-        [:"$_"]
+        {Link, {name, :"$1"}, :"$2", :"$3"},
+        [],
+        [{{:"$1", :"$2", :"$3"}}]
       }])
         |> Amnesia.Selection.values
-        |> Enum.map(fn {_, mf, tag, to, occ} -> Link.delete(%Link{
-          mod_from: mf, tag: tag, to: to, occurrences: occ}) end)
+        |> Enum.map(fn {from, tag, to} ->
+          Link.delete({name, from})
+          Weight.delete(%Link{mod_from: {name, from}, tag: tag, to: to})
+        end)
       Master.delete(name)
       Operation.delete(name)
       :ok

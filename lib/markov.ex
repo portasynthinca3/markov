@@ -281,11 +281,14 @@ defmodule Markov do
   end
 
   @doc "Reads the model for debugging purposes"
-  @spec dump_model(model_reference()) :: [Markov.Database.Link.t()]
+  @spec dump_model(model_reference()) :: [Markov.Database.Weight.t()]
   def dump_model(model) do
     {:via, Registry, {Markov.ModelServers, name}} = model
-    Markov.Database.Link.match!(mod_from: {name, :_}, tag: :_, to: :_, occurrences: :_)
+    Markov.Database.Link.match!(mod_from: {name, :_}, tag: :_, to: :_)
       |> Amnesia.Selection.values
+      |> Enum.map(fn link ->
+        Markov.Database.Weight.read!(link)
+      end)
   end
 
   @doc "Deletes model data forever. There's no going back!"

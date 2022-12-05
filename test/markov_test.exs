@@ -1,5 +1,6 @@
 defmodule MarkovTest do
   use ExUnit.Case
+  alias Markov.Database.{Link, Weight}
 
   test "creating the model" do
     Markov.nuke("model")
@@ -42,11 +43,11 @@ defmodule MarkovTest do
     assert Markov.train(model, "hello world 2") == :ok
     tokens = Markov.dump_model(model) |> MapSet.new
     reference = MapSet.new([
-      %Markov.Database.Link{mod_from: {"model", [:start, :start]},   tag: :"$none", to: "hello", occurrences: 2},
-      %Markov.Database.Link{mod_from: {"model", [:start, "hello"]},  tag: :"$none", to: "world", occurrences: 2},
-      %Markov.Database.Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: :end,    occurrences: 1},
-      %Markov.Database.Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: "2",     occurrences: 1},
-      %Markov.Database.Link{mod_from: {"model", ["world", "2"]},     tag: :"$none", to: :end,    occurrences: 1},
+      %Weight{link: %Link{mod_from: {"model", [:start, :start]}, tag: :"$none", to: "hello"}, value: 2},
+      %Weight{link: %Link{mod_from: {"model", [:start, "hello"]}, tag: :"$none", to: "world"}, value: 2},
+      %Weight{link: %Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: :end}, value: 1},
+      %Weight{link: %Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: "2"}, value: 1},
+      %Weight{link: %Link{mod_from: {"model", ["world", "2"]}, tag: :"$none", to: :end}, value: 1},
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
@@ -59,11 +60,11 @@ defmodule MarkovTest do
     assert Markov.train(model, "hello, World") == :ok
     tokens = Markov.dump_model(model) |> MapSet.new
     reference = MapSet.new([
-      %Markov.Database.Link{mod_from: {"model", [:start, :start]},   tag: :"$none", to: "hello",  occurrences: 1},
-      %Markov.Database.Link{mod_from: {"model", [:start, :start]},   tag: :"$none", to: "hello,", occurrences: 1},
-      %Markov.Database.Link{mod_from: {"model", [:start, "hello"]},  tag: :"$none", to: "World",  occurrences: 1},
-      %Markov.Database.Link{mod_from: {"model", [:start, "hello"]},  tag: :"$none", to: "world",  occurrences: 1},
-      %Markov.Database.Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: :end,     occurrences: 2}
+      %Weight{link: %Link{mod_from: {"model", [:start, :start]}, tag: :"$none", to: "hello"}, value: 1},
+      %Weight{link: %Link{mod_from: {"model", [:start, :start]}, tag: :"$none", to: "hello,"}, value: 1},
+      %Weight{link: %Link{mod_from: {"model", [:start, "hello"]}, tag: :"$none", to: "World"}, value: 1},
+      %Weight{link: %Link{mod_from: {"model", [:start, "hello"]}, tag: :"$none", to: "world"}, value: 1},
+      %Weight{link: %Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: :end}, value: 2},
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
@@ -76,13 +77,13 @@ defmodule MarkovTest do
     assert Markov.train(model, "a b c d") == :ok
     tokens = Markov.dump_model(model) |> MapSet.new
     reference = MapSet.new([
-      %Markov.Database.Link{mod_from: {"model", [:start, :start, :start, :start, :start]}, tag: :"$none", to: "a", occurrences: 2},
-      %Markov.Database.Link{mod_from: {"model", [:start, :start, :start, :start, "a"]}, tag: :"$none", to: "b", occurrences: 2},
-      %Markov.Database.Link{mod_from: {"model", [:start, :start, :start, "a", "b"]}, tag: :"$none", to: "c", occurrences: 2},
-      %Markov.Database.Link{mod_from: {"model", [:start, :start, "a", "b", "c"]}, tag: :"$none", to: "d", occurrences: 2},
-      %Markov.Database.Link{mod_from: {"model", [:start, "a", "b", "c", "d"]}, tag: :"$none", to: :end, occurrences: 1},
-      %Markov.Database.Link{mod_from: {"model", [:start, "a", "b", "c", "d"]}, tag: :"$none", to: "e", occurrences: 1},
-      %Markov.Database.Link{mod_from: {"model", ["a", "b", "c", "d", "e"]}, tag: :"$none", to: :end, occurrences: 1},
+      %Weight{link: %Link{mod_from: {"model", [:start, :start, :start, :start, :start]}, tag: :"$none", to: "a"}, value: 2},
+      %Weight{link: %Link{mod_from: {"model", [:start, :start, :start, :start, "a"]}, tag: :"$none", to: "b"}, value: 2},
+      %Weight{link: %Link{mod_from: {"model", [:start, :start, :start, "a", "b"]}, tag: :"$none", to: "c"}, value: 2},
+      %Weight{link: %Link{mod_from: {"model", [:start, :start, "a", "b", "c"]}, tag: :"$none", to: "d"}, value: 2},
+      %Weight{link: %Link{mod_from: {"model", [:start, "a", "b", "c", "d"]}, tag: :"$none", to: :end}, value: 1},
+      %Weight{link: %Link{mod_from: {"model", [:start, "a", "b", "c", "d"]}, tag: :"$none", to: "e"}, value: 1},
+      %Weight{link: %Link{mod_from: {"model", ["a", "b", "c", "d", "e"]}, tag: :"$none", to: :end}, value: 1},
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
