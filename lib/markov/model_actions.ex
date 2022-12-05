@@ -245,19 +245,19 @@ defmodule Markov.ModelActions do
   @spec nuke(name :: term()) :: :ok
   def nuke(name) do
     # WARNING: matchspec ahead
-    Amnesia.transaction do
-      Link.select([{
+    Amnesia.async do
+      Link.select!([{
         {Link, {name, :"$1"}, :"$2", :"$3"},
         [],
         [{{:"$1", :"$2", :"$3"}}]
       }])
         |> Amnesia.Selection.values
         |> Enum.map(fn {from, tag, to} ->
-          Link.delete({name, from})
-          Weight.delete(%Link{mod_from: {name, from}, tag: tag, to: to})
+          Link.delete!({name, from})
+          Weight.delete!(%Link{mod_from: {name, from}, tag: tag, to: to})
         end)
-      Master.delete(name)
-      Operation.delete(name)
+      Master.delete!(name)
+      Operation.delete!(name)
       :ok
     end
   end
