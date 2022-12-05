@@ -4,36 +4,20 @@ defmodule Markov.Prompt do
   it's been trained on the appropriate data
   """
 
-  defp map_token({token, index}, {lower_thres, upper_thres}) do
+  defp map_token(token) do
     token = Markov.TextUtil.sanitize_token(token)
-    type_to_score = %{noun: 50, verb: 30, adj: 25, adv: 10, prep: 5}
+    type_to_score = %{noun: 50, verb: 30, adj: 25, adv: 10}
     result = :ets.lookup(Markov.Dictionary, token)
 
-    score = case result do
-      [] -> 1
-      [{_, type}] -> Map.get(type_to_score, type)
+    case result do
+      [] -> []
+      [{_, :prep}] -> []
+      [{_, type}] -> [{token, Map.get(type_to_score, type)}]
     end
-
-    [
-      {token, score},
-      case index do
-        i when i <= lower_thres -> {{token, :start}, 2}
-        i when i >= upper_thres -> {{token, :end}, 2}
-        _ -> {{token, :middle}, 2}
-      end
-    ]
   end
 
-  defp generate_tags(text) do
-    tokens = String.split(text)
-    max = length(tokens) - 1
-    range = 0..max
-
-    thres = {floor(0.2 * max), ceil(0.8 * max)}
-
-    Enum.zip(tokens, range)
-      |> Enum.flat_map(fn item -> map_token(item, thres) end)
-  end
+  defp generate_tags(text), do:
+    String.split(text) |> Enum.flat_map(&map_token/1)
 
   @doc """
   Assuming your application receives a stream of strings, call this function
