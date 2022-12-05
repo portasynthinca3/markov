@@ -91,6 +91,17 @@ defmodule Markov.ModelServer do
     {:reply, result, state}
   end
 
+  def handle_info({:EXIT, pid, reason}, state) do
+    cond do
+      pid == self() ->
+        {:stop, reason, state}
+      reason == :normal or reason == :shutdown ->
+        {:noreply, state}
+      true ->
+        {:stop, reason, state}
+    end
+  end
+
   # Internal functions
 
   @spec write_log_entry(state :: State.t(), type :: Markov.log_entry_type(), data :: term()) :: :ok | :ignored
