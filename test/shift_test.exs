@@ -3,14 +3,14 @@ defmodule ShiftTest do
   import Markov
 
   test "prompts" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("./test", "model", store_history: [], shift_probabilities: true)
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model", store_log: [], shift_probabilities: true)
 
-    assert Markov.train(model, "hello world") == {:ok, :done}
-    assert Markov.train(model, "hello world") == {:ok, :done}
-    assert Markov.train(model, "hello world") == {:ok, :done}
-    assert Markov.train(model, "hello elixir") == {:ok, :done}
-    assert Markov.train(model, "hello elixir") == {:ok, :done}
+    assert Markov.train(model, "hello world") == :ok
+    assert Markov.train(model, "hello world") == :ok
+    assert Markov.train(model, "hello world") == :ok
+    assert Markov.train(model, "hello elixir") == :ok
+    assert Markov.train(model, "hello elixir") == :ok
 
     %{{:ok, "hello world"} => world, {:ok, "hello elixir"} => elixir} =
       0..999

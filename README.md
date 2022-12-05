@@ -19,29 +19,36 @@ Text generation library based on nth-order Markov chains
 In `mix.exs`:
 ```elixir
 defp deps do
-  [{:markov, "~> 2.1"}]
+  [{:markov, "~> 3.0"}]
 end
 ```
+Before using for the first time:
+```
+$ mix amnesia.create -d Markov.Database --disk
+```
 
-Unlike Markov 1.x, this version has very strong opinions on how you should create and persist your models.
+Unlike Markov 1.x, this version has very strong opinions on how you should create and persist your models (that differs from 2.x).
 
 Example workflow (click [here](https://hexdocs.pm/markov/api-reference.html) for full docs):
 ```elixir
-# the model is to be stored under /base/directory/model_name
-# the model will be created using specified options if not found
-{:ok, model} = Markov.load("/base/directory", "model_name", sanitize_tokens: true, store_history: [:train])
+# The name can be an arbitrary term (not just a string).
+# It will be stored in a Mnesia DB and created from scratch using the specified
+# parameters if not found.
+# You should configure mnesia if you want to change its working dir, e.g.:
+# `config :mnesia, dir: "/var/data"`
+{:ok, model} = Markov.load("model_name", sanitize_tokens: true, store_log: [:train])
 
 # train using four strings
-{:ok, _} = Markov.train(model, "hello, world!")
-{:ok, _} = Markov.train(model, "example string number two")
-{:ok, _} = Markov.train(model, "hello, Elixir!")
-{:ok, _} = Markov.train(model, "fourth string")
+:ok = Markov.train(model, "hello, world!")
+:ok = Markov.train(model, "example string number two")
+:ok = Markov.train(model, "hello, Elixir!")
+:ok = Markov.train(model, "fourth string")
 
 # generate text
 {:ok, text} = Markov.generate_text(model)
-IO.inspect(text)
+IO.puts(text)
 
-# unload model from RAM
+# commit all changes and unload
 Markov.unload(model)
 
 # these will return errors because the model is unloaded
@@ -54,7 +61,7 @@ Markov.unload(model)
 # enable probability shifting and generate text
 :ok = Markov.configure(model, shift_probabilities: true)
 {:ok, text} = Markov.generate_text(model)
-IO.inspect(text)
+IO.puts(text)
 
 # print uninteresting stats
 model |> Markov.dump_partition(0) |> IO.inspect

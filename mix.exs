@@ -4,7 +4,7 @@ defmodule Markov.MixProject do
   def project do
     [
       app: :markov,
-      version: "2.4.1",
+      version: "3.0.0",
       elixir: "~> 1.12",
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
@@ -35,7 +35,7 @@ defmodule Markov.MixProject do
 
   defp description do
     """
-    Text generation library based on second-order Markov chains
+    High-performance text generation library based on nth-order Markov chains
     """
   end
 
@@ -44,7 +44,7 @@ defmodule Markov.MixProject do
       {:flow, "~> 1.2"},
       {:nx, "~> 0.3"},
       {:exla, "~> 0.3"},
-      {:libring, "~> 1.6"},
+      {:amnesia, "~> 0.2.8"},
       {:ex_doc, "~> 0.28", only: :dev, runtime: false},
       {:observer_cli, "~> 1.7", only: :dev, runtime: false},
       {:credo, "~> 1.6", only: :dev, runtime: false}

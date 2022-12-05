@@ -2,23 +2,30 @@ defmodule Markov do
   @moduledoc """
   Public API
 
+  Before using for the first time:
+
+      $ mix amnesia.create -d Markov.Database --disk
+
   Example workflow:
 
-      # the model is to be stored under /base/directory/model_name
-      # the model will be created using specified options if not found
-      {:ok, model} = Markov.load("/base/directory", "model_name", sanitize_tokens: true, store_history: [:train])
+      # The name can be an arbitrary term (not just a string).
+      # It will be stored in a Mnesia DB and created from scratch using the specified
+      # parameters if not found.
+      # You should configure mnesia if you want to change its working dir, e.g.:
+      # `config :mnesia, dir: "/var/data"`
+      {:ok, model} = Markov.load("model_name", sanitize_tokens: true, store_log: [:train])
 
       # train using four strings
-      {:ok, _} = Markov.train(model, "hello, world!")
-      {:ok, _} = Markov.train(model, "example string number two")
-      {:ok, _} = Markov.train(model, "hello, Elixir!")
-      {:ok, _} = Markov.train(model, "fourth string")
+      :ok = Markov.train(model, "hello, world!")
+      :ok = Markov.train(model, "example string number two")
+      :ok = Markov.train(model, "hello, Elixir!")
+      :ok = Markov.train(model, "fourth string")
 
       # generate text
       {:ok, text} = Markov.generate_text(model)
-      IO.inspect(text)
+      IO.puts(text)
 
-      # unload model from RAM
+      # commit all changes and unload
       Markov.unload(model)
 
       # these will return errors because the model is unloaded
@@ -31,7 +38,7 @@ defmodule Markov do
       # enable probability shifting and generate text
       :ok = Markov.configure(model, shift_probabilities: true)
       {:ok, text} = Markov.generate_text(model)
-      IO.inspect(text)
+      IO.puts(text)
 
       # print uninteresting stats
       model |> Markov.dump_partition(0) |> IO.inspect
@@ -43,32 +50,20 @@ defmodule Markov do
 
   @opaque model_reference() :: {:via, term(), term()}
 
-  @type log_entry_type() ::
-    :train        | :train_deferred |
-    :repart_start | :repart_done |
-    :start        | :end |
-    :gen
+  @type log_entry_type() :: :start | :end | :train | :gen
 
   @typedoc """
   Model options that could be set during creation in a call to `load/3`
   or with `configure/2`:
-    - `store_history`: determines what data to put in the operation log, all of them
+    - `store_log`: determines what data to put in the operation log, all of them
     by default:
-      - `:train`: training requests
-      - `:train_deferred`: training requests that have been deferred to until after
-      repartitioning is complete
-      - `:gen`: generation results
-      - `:repart_start` - repartition start
-      - `:repart_done` - repartition done
       - `:start` - model is loaded
       - `:end` - model is unloaded
+      - `:train`: training requests
+      - `:gen`: generation results
     - `shift_probabilities`: gives less popular generation paths more chance to
     get used, which makes the output more original but may produce nonsense; false
     by default
-    - `partition_size`: approximate number of link entries in one partition, 10k
-    by default
-    - `partition_timeout`: partition is unloaded from RAM after that many
-    milliseconds of inactivity, 10k by default
     - `sanitize_tokens`: ignores letter case and punctuation when switching states,
     but still keeps the output as-is; false by default, can't be changed once the
     model is created
@@ -76,42 +71,31 @@ defmodule Markov do
     based on; 2 by default, can never be changed once the model is created
   """
   @type model_option() ::
-    {:store_history, [log_entry_type()]} |
+    {:store_log, [log_entry_type()]} |
     {:shift_probabilities, boolean()} |
-    {:partition_size, integer()} |
-    {:partition_timeout, integer()} |
     {:sanitize_tokens, boolean()} |
     {:order, integer()}
 
   @spec default_opts() :: [model_option()]
   defp default_opts do
     [
-      store_history: [
-        :train, :train_deferred,
-        :repart_start, :repart_done,
-        :start, :end,
-        :gen
-      ],
+      store_log: [:start, :end, :train, :gen],
       shift_probabilities: false,
-      partition_size: 10_000,
-      partition_timeout: 10_000,
       sanitize_tokens: false,
       order: 2
     ]
   end
 
   @doc """
-  Loads an existing model from `base_dir`/`name`. If none is found, a new model
-  with the specified options at that path will be created and loaded, and if that
-  fails, an error will be returned
+  Loads an existing model named `name`. If none is found, a new model with the
+  specified options will be created and loaded, and if that fails, an error will
+  be returned.
   """
-  @spec load(base_dir :: String.t(), name :: String.t(), options :: [model_option()]) ::
-    {:ok, model_reference()} | {:error, term()}
-  def load(base_dir, name, create_options \\ []) do
+  @spec load(name :: term(), options :: [model_option()]) :: {:ok, model_reference()} | {:error, term()}
+  def load(name, create_options \\ []) do
     # start process responsible for it
     result = Markov.ModelServer.start(
       name: name,
-      path: Path.join(base_dir, name),
       create_opts: Keyword.merge(default_opts(), create_options)
     )
     case result do
@@ -150,22 +134,17 @@ defmodule Markov do
   @doc """
   Trains `model` using text or a list of tokens.
 
-      {:ok, _} = Markov.train(model, "Hello, world!")
-      {:ok, _} = Markov.train(model, "this is a string that's broken down into tokens behind the scenes")
-      {:ok, _} = Markov.train(model, [
+      :ok = Markov.train(model, "Hello, world!")
+      :ok = Markov.train(model, "this is a string that's broken down into tokens behind the scenes")
+      :ok = Markov.train(model, [
         :this, "is", 'a token', :list, "where",
         {:each_element, :is, {:taken, :as_is}},
         :and, :can_be, :erlang.make_ref(), "<-- any term"
       ])
 
-  Returns the status of the operation:
-    - `:done` - training is complete
-    - `:deferred` - a repartition is currently in progress, this request has
-    been placed in the backlog to be fulfilled after repartitioning is complete
-
-  See `generate_text/2` for more info about `specifiers`
+  See `generate_text/2` for more info about `tags`
   """
-  @spec train(model_reference(), String.t() | [term()], [term()]) :: {:ok, :done | :deferred} | {:error, term()}
+  @spec train(model_reference(), String.t() | [term()], [term()]) :: :ok | {:error, term()}
   def train(model, text, tags \\ [:"$none"])
   def train(model, text, tags) when is_binary(text) do
     tokens = String.split(text)
@@ -199,14 +178,14 @@ defmodule Markov do
         {:subject, "earth"},
         :lowercase
       ])
-      {:ok, :done}
+      :ok
       iex> Markov.train(model, "Hello Elixir", [
         {:action, :saying_hello},
         {:subject_type, :programming_language},
         {:subject, "Elixir"},
         :uppercase
       ])
-      {:ok, :done}
+      :ok
 
 
       # simple generation - both paths have equal probabilities
@@ -252,7 +231,7 @@ defmodule Markov do
       iex> Markov.generate_tokens(model)
       {:ok, ["hello", "world"]}
 
-  See type `tag_query/0` for more info about `tags`
+  See type `tag_query/0` for more info about `tag_query`
   """
   @spec generate_tokens(model_reference(), tag_query()) :: {:ok, [term()]} | {:error, term()}
   def generate_tokens(model, tag_query \\ true) do
@@ -276,47 +255,40 @@ defmodule Markov do
     end
   end
 
+  defmodule Operation do
+    defstruct [:date_time, :type, :arg]
+    @type t() :: %__MODULE__{date_time: DateTime.t(), type: Markov.log_entry_type(), arg: term()}
+  end
+
   @doc """
   Reads the log file and returns a list of entries in chronological order
 
       iex> Markov.read_log(model)
       {:ok,
        [
-         {~U[2022-10-02 16:59:51.844Z], :start, nil},
-         {~U[2022-10-02 16:59:56.705Z], :train, ["hello", "world"]}
+         %Operation{date_time: ~U[2022-10-02 16:59:51.844Z], type: :start, arg: nil},
+         %Operation{date_time: ~U[2022-10-02 16:59:56.705Z], type: :train, arg: ["hello", "world"]}
        ]}
   """
-  @spec read_log(model_reference()) :: {:ok, [{DateTime.t(), log_entry_type(), term()}]} | {:error, term()}
+  @spec read_log(model_reference()) :: [Markov.Database.Operation.t()]
   def read_log(model) do
-    path = GenServer.call(model, :get_log_file)
-    {:ok, %File.Stat{size: size}} = File.stat(path)
-    File.open(path, [:read], fn handle ->
-      read_log_entries(handle, size, 0) |> :lists.reverse
-    end)
+    {:via, Registry, {Markov.ModelServers, name}} = model
+    Markov.Database.Operation.read!(name)
+      |> Enum.sort(& &1.ts <= &2.ts)
+      |> Enum.map(fn %Markov.Database.Operation{type: type, ts: ts, argument: arg} ->
+        %Operation{date_time: DateTime.from_unix!(ts, :millisecond), type: type, arg: arg}
+      end)
   end
 
-  defp read_log_entries(handle, size, pos, acc \\ [])
-  defp read_log_entries(_handle, size, pos, acc) when pos >= size, do: acc
-  defp read_log_entries(handle, size, pos, acc) do
-    <<entry_size::16>> = IO.binread(handle, 2)
-    data = IO.binread(handle, entry_size)
-    {unix_time, type, data} = :erlang.binary_to_term(data)
-    {:ok, time} = DateTime.from_unix(unix_time, :millisecond)
-    entry = {time, type, data}
-    read_log_entries(handle, size, pos + 2 + entry_size, [entry | acc])
+  @doc "Reads the model for debugging purposes"
+  @spec dump_model(model_reference()) :: [Markov.Database.Link.t()]
+  def dump_model(model) do
+    {:via, Registry, {Markov.ModelServers, name}} = model
+    Markov.Database.Link.match!(mod_from: {name, :_}, tag: :_, to: :_, occurrences: :_)
+      |> Amnesia.Selection.values
   end
 
-  @doc "Reads an entire partition for debugging purposes"
-  @spec dump_partition(model_reference(), integer()) :: [{[term()], term(), term(), integer()}]
-  def dump_partition(model, part_no) do
-    # the server opens the table for us
-    {:ok, tid} = GenServer.call(model, {:prepare_dump_info, part_no})
-    :ets.match(tid, :"$1") |> Enum.map(fn [x] -> x end)
-  end
-
-  @doc "Deletes model data. There's no going back :)"
-  @spec nuke(model :: model_reference()) :: :ok
-  def nuke(model) do
-    GenServer.call(model, :nuke)
-  end
+  @doc "Deletes model data forever. There's no going back!"
+  @spec nuke(name :: term()) :: :ok
+  defdelegate nuke(name), to: Markov.ModelActions
 end

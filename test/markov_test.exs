@@ -2,108 +2,106 @@ defmodule MarkovTest do
   use ExUnit.Case
 
   test "creating the model" do
-    File.rm_rf(Path.join("test", "model"))
-    {:ok, model} = Markov.load("test", "model")
-    Markov.unload(model)
-  end
-
-  test "creating the model in a non-existent dir" do
-    assert Markov.load("/hopefully/this/path/doesnt", "exist") == {:error, :enoent}
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model")
+    :ok = Markov.unload(model)
   end
 
   test "reconfiguration" do
-    {:ok, model} = Markov.load("test", "model")
-    Markov.configure(model, partition_size: 5000)
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model")
+    Markov.configure(model, shift_probabilities: true)
     {:ok, config} = Markov.get_config(model)
     Markov.unload(model)
-    assert config[:partition_size] == 5000
+    assert config[:shift_probabilities] == true
   end
 
   test "configuration persistence" do
-    {:ok, model} = Markov.load("test", "model")
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model")
     Markov.configure(model, partition_size: 7500)
     Markov.unload(model)
-    {:ok, model} = Markov.load("test", "model")
+    {:ok, model} = Markov.load("model")
     {:ok, config} = Markov.get_config(model)
     assert config[:partition_size] == 7500
     Markov.unload(model)
   end
 
   test "invalid configuration" do
-    File.rm_rf(Path.join("test", "model"))
-    {:ok, model} = Markov.load("test", "model")
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model")
     assert Markov.configure(model, sanitize_tokens: true) == {:error, :cant_change_sanitation}
     assert Markov.configure(model, order: 3) == {:error, :cant_change_order}
     Markov.unload(model)
   end
 
   test "training" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("test", "model")
-    assert Markov.train(model, "hello world") == {:ok, :done}
-    assert Markov.train(model, "hello world 2") == {:ok, :done}
-    tokens = Markov.dump_partition(model, 0) |> MapSet.new
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model")
+    assert Markov.train(model, "hello world") == :ok
+    assert Markov.train(model, "hello world 2") == :ok
+    tokens = Markov.dump_model(model) |> MapSet.new
     reference = MapSet.new([
-      {[:start, :start], :"$none", "hello", 2},
-      {[:start, "hello"], :"$none", "world", 2},
-      {["hello", "world"], :"$none", :end, 1},
-      {["hello", "world"], :"$none", "2", 1},
-      {["world", "2"], :"$none", :end, 1}
+      %Markov.Database.Link{mod_from: {"model", [:start, :start]},   tag: :"$none", to: "hello", occurrences: 2},
+      %Markov.Database.Link{mod_from: {"model", [:start, "hello"]},  tag: :"$none", to: "world", occurrences: 2},
+      %Markov.Database.Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: :end,    occurrences: 1},
+      %Markov.Database.Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: "2",     occurrences: 1},
+      %Markov.Database.Link{mod_from: {"model", ["world", "2"]},     tag: :"$none", to: :end,    occurrences: 1},
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
   end
 
   test "training with token sanitation" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("test", "model", sanitize_tokens: true)
-    assert Markov.train(model, "hello world") == {:ok, :done}
-    assert Markov.train(model, "hello, World") == {:ok, :done}
-    tokens = Markov.dump_partition(model, 0) |> MapSet.new
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model", sanitize_tokens: true)
+    assert Markov.train(model, "hello world") == :ok
+    assert Markov.train(model, "hello, World") == :ok
+    tokens = Markov.dump_model(model) |> MapSet.new
     reference = MapSet.new([
-      {[:start, :start], :"$none", "hello", 1},
-      {[:start, :start], :"$none", "hello,", 1},
-      {[:start, "hello"], :"$none", "World", 1},
-      {[:start, "hello"], :"$none", "world", 1},
-      {["hello", "world"], :"$none", :end, 2}
+      %Markov.Database.Link{mod_from: {"model", [:start, :start]},   tag: :"$none", to: "hello",  occurrences: 1},
+      %Markov.Database.Link{mod_from: {"model", [:start, :start]},   tag: :"$none", to: "hello,", occurrences: 1},
+      %Markov.Database.Link{mod_from: {"model", [:start, "hello"]},  tag: :"$none", to: "World",  occurrences: 1},
+      %Markov.Database.Link{mod_from: {"model", [:start, "hello"]},  tag: :"$none", to: "world",  occurrences: 1},
+      %Markov.Database.Link{mod_from: {"model", ["hello", "world"]}, tag: :"$none", to: :end,     occurrences: 2}
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
   end
 
   test "training 5th order chain" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("test", "model", order: 5)
-    assert Markov.train(model, "a b c d e") == {:ok, :done}
-    assert Markov.train(model, "a b c d") == {:ok, :done}
-    tokens = Markov.dump_partition(model, 0) |> MapSet.new
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model", order: 5)
+    assert Markov.train(model, "a b c d e") == :ok
+    assert Markov.train(model, "a b c d") == :ok
+    tokens = Markov.dump_model(model) |> MapSet.new
     reference = MapSet.new([
-      {[:start, :start, :start, :start, :start], :"$none", "a", 2},
-      {[:start, :start, :start, :start, "a"], :"$none", "b", 2},
-      {[:start, :start, :start, "a", "b"], :"$none", "c", 2},
-      {[:start, :start, "a", "b", "c"], :"$none", "d", 2},
-      {[:start, "a", "b", "c", "d"], :"$none", :end, 1},
-      {[:start, "a", "b", "c", "d"], :"$none", "e", 1},
-      {["a", "b", "c", "d", "e"], :"$none", :end, 1}
+      %Markov.Database.Link{mod_from: {"model", [:start, :start, :start, :start, :start]}, tag: :"$none", to: "a", occurrences: 2},
+      %Markov.Database.Link{mod_from: {"model", [:start, :start, :start, :start, "a"]}, tag: :"$none", to: "b", occurrences: 2},
+      %Markov.Database.Link{mod_from: {"model", [:start, :start, :start, "a", "b"]}, tag: :"$none", to: "c", occurrences: 2},
+      %Markov.Database.Link{mod_from: {"model", [:start, :start, "a", "b", "c"]}, tag: :"$none", to: "d", occurrences: 2},
+      %Markov.Database.Link{mod_from: {"model", [:start, "a", "b", "c", "d"]}, tag: :"$none", to: :end, occurrences: 1},
+      %Markov.Database.Link{mod_from: {"model", [:start, "a", "b", "c", "d"]}, tag: :"$none", to: "e", occurrences: 1},
+      %Markov.Database.Link{mod_from: {"model", ["a", "b", "c", "d", "e"]}, tag: :"$none", to: :end, occurrences: 1},
     ])
     assert MapSet.equal?(tokens, reference)
     Markov.unload(model)
   end
 
   test "generation" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("test", "model")
-    assert Markov.train(model, "a b c d") == {:ok, :done}
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model")
+    assert Markov.train(model, "a b c d") == :ok
     assert Markov.generate_text(model) == {:ok, "a b c d"}
     Markov.unload(model)
   end
 
   test "probability correctness" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("test", "model")
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model")
 
-    assert Markov.train(model, "1") == {:ok, :done}
-    assert Markov.train(model, "2") == {:ok, :done}
+    assert Markov.train(model, "1") == :ok
+    assert Markov.train(model, "2") == :ok
 
     %{{:ok, "1"} => one, {:ok, "2"} => two} =
       0..499
@@ -117,53 +115,15 @@ defmodule MarkovTest do
   end
 
   test "log reading" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("test", "model")
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model", store_log: [:start, :train])
 
-    assert Markov.train(model, "1") == {:ok, :done}
+    assert Markov.train(model, "1") == :ok
     assert Markov.generate_text(model) == {:ok, "1"}
-    matches = case Markov.read_log(model) do
-      {:ok, [
-        {_, :start, nil},
-        {_, :train, ["1"]},
-        {_, :gen, {:ok, ["1"]}},
-      ]} -> true
-      _ -> false
-    end
-    assert matches
-
-    Markov.unload(model)
-  end
-
-  test "repartition integrity" do
-    training_data = [
-      "asd sdf dfg fgh ghj hjk jkl kl",
-      "a s d f g h j k l",
-      "as sd df fg gh hj jk kl",
-      "qwe wer ert rty tyu yui uio iop",
-      "q w e r t y u i o p",
-      "qw we er rt ty yu ui io op"
+    assert Markov.read_log(model) |> Enum.map(fn x -> %{x | date_time: nil} end) == [
+      %Markov.Operation{type: :start, date_time: nil, arg: nil},
+      %Markov.Operation{type: :train, date_time: nil, arg: ["1"]},
     ]
-
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("test", "model", partition_size: 10)
-
-    for str <- training_data, do:
-      assert Markov.train(model, str) == {:ok, :done}
-    for _ <- 0..499, do:
-      assert :erlang.element(2, Markov.generate_text(model)) in training_data
-
-    Markov.unload(model)
-  end
-
-  @tag :nuke
-  test "nuking" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("test", "model")
-
-    assert Markov.train(model, "hello world") == {:ok, :done}
-    assert Markov.nuke(model) == :ok
-    assert Markov.dump_partition(model, 0) == []
 
     Markov.unload(model)
   end

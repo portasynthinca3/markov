@@ -5,16 +5,17 @@ defmodule Markov.ModelActions do
   """
 
   alias Markov.ModelServer.State
-  import Markov.ModelServer, only: [open_partition!: 2]
+  use Amnesia
+  alias Markov.Database.{Link, Master, Operation}
   import Nx.Defn
   @nx_batch_size 1024
 
   # WARNING: match specifications ahead
 
   @doc "tag query to match specification"
-  @spec tq2ms([term()], Markov.tag_query()) :: :ets.match_spec()
-  def tq2ms(from, query), do: [{
-    {from, :"$1", :"$2", :"$3"},
+  @spec tq2ms({term(), [term()]}, Markov.tag_query()) :: :ets.match_spec()
+  def tq2ms(mf, query), do: [{
+    {Link, mf, :"$1", :"$2", :"$3"},
     [tq2msc(query)],
     [{{:"$2", :"$3"}}]
   }]
@@ -28,14 +29,14 @@ defmodule Markov.ModelActions do
   def tq2msc(tag), do: {:==, :"$1", {:const, tag}}
 
   @doc "processes {_, :score, _} tag queries"
-  def process_scores(from, rows, {_, :score, queries}, table) do
+  def process_scores(mf, rows, {_, :score, queries}) do
     to_sets = for {query, score} <- queries do
       ms = [{
-        {from, :"$1", :"$2", :_},
+        {Link, mf, :"$1", :"$2", :_},
         [tq2msc(query)],
         [:"$2"]
       }]
-      {:ets.select(table, ms) |> MapSet.new, score}
+      {Link.select(ms) |> Amnesia.Selection.values |> MapSet.new, score}
     end
 
     rows_tos = MapSet.new(for {to, _} <- rows, do: to)
@@ -49,13 +50,14 @@ defmodule Markov.ModelActions do
     end)
   end
 
-  def process_scores(_, _, _, _), do: %{}
+  def process_scores(_, _, _), do: %{}
 
-  @spec train(state :: State.t(), tokens :: [term()], tags :: [term()]) :: State.t()
+  @spec train(state :: State.t(), tokens :: [term()], tags :: [term()]) :: :ok
   def train(state, tokens, tags) do
     order = state.options[:order]
     tokens = Enum.map(0..(order - 1), fn _ -> :start end) ++ tokens ++ [:end]
-    Markov.ListUtil.overlapping_stride(tokens, order + 1) |> Enum.reduce(state, fn bit, state ->
+
+    Markov.ListUtil.overlapping_stride(tokens, order + 1) |> Enum.map(fn bit ->
       from = Enum.slice(bit, 0..-2)
       to = Enum.at(bit, -1)
 
@@ -64,21 +66,21 @@ defmodule Markov.ModelActions do
         Enum.map(from, &Markov.TextUtil.sanitize_token/1)
       else from end
 
-      partition = HashRing.key_to_node(state.ring, from)
-      state = open_partition!(state, partition) # doesn't do anything if already open
-      {table, timeout_pid} = Map.get(state.open_partitions, partition)
-      send(timeout_pid, :defer) # signal usage
-
-      for tag <- tags do
-        case :ets.match(table, {from, tag, to, :"$1"}) do
-          [] -> :ets.insert(table, {from, tag, to, 1})
-          [[previous]] ->
-            :ets.match_delete(table, {from, tag, to, previous})
-            :ets.insert(table, {from, tag, to, previous + 1})
+      mf = {state.name, from}
+      Amnesia.transaction do
+        for tag <- tags do
+          case Link.match(mod_from: mf, tag: tag, to: to, occurrences: :_) |> Amnesia.Selection.values do
+            [] ->
+              %Link{mod_from: mf, tag: tag, to: to, occurrences: 1} |> Link.write
+            [%Link{} = prev] ->
+              prev |> Link.delete()
+              %Link{prev | occurrences: prev.occurrences + 1} |> Link.write
+          end
         end
       end
-      %{state | total_links: state.total_links + 1}
     end)
+
+    :ok
   end
 
   @spec generate(State.t(), Markov.tag_query()) :: {{:ok, [term()]} | {:error, term()}, State.t()}
@@ -107,25 +109,23 @@ defmodule Markov.ModelActions do
       Enum.map(current, &Markov.TextUtil.sanitize_token/1)
     else current end
 
-    partition = HashRing.key_to_node(state.ring, current)
-    {table, timeout_pid} = Map.get(state.open_partitions, partition)
-    state = open_partition!(state, partition)
-    send(timeout_pid, :defer)
-
-    case :ets.select(table, tq2ms(current, tag_query)) do
-      [] -> {:error, {:no_matches, current}, state}
-      rows ->
-        rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows
-        scores = process_scores(current, rows, tag_query, table)
-        rows = rows |> Enum.map(fn {to, frequency} ->
-          score = Map.get(scores, to, 0) + 1
-          {to, frequency * score}
-        end)
-        sum = rows
-          |> Enum.map(fn {_, frequency} -> frequency end)
-          |> Enum.sum
-        result = probabilistic_select(:rand.uniform(sum) - 1, rows, sum)
-        {:ok, result, state}
+    mf = {state.name, current}
+    Amnesia.transaction do
+      case Link.select(tq2ms(mf, tag_query)) |> Amnesia.Selection.values do
+        [] -> {:error, {:no_matches, current}, state}
+        rows ->
+          rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows
+          scores = process_scores(mf, rows, tag_query)
+          rows = rows |> Enum.map(fn {to, frequency} ->
+            score = Map.get(scores, to, 0) + 1
+            {to, frequency * score}
+          end)
+          sum = rows
+            |> Enum.map(fn {_, frequency} -> frequency end)
+            |> Enum.sum
+          result = probabilistic_select(:rand.uniform(sum) - 1, rows, sum)
+          {:ok, result, state}
+      end
     end
   end
 
@@ -238,5 +238,23 @@ defmodule Markov.ModelActions do
         Enum.zip(batch, processed) |> Enum.map(fn {{{k, _}, _}, v} -> {k, v} end)
       end)
       |> Enum.into([])
+  end
+
+  @spec nuke(name :: term()) :: :ok
+  def nuke(name) do
+    # WARNING: matchspec ahead
+    Amnesia.transaction do
+      Link.select([{
+        {Link, {name, :_}, :_, :_, :_},
+        [{:==, 1, 1}],
+        [:"$_"]
+      }])
+        |> Amnesia.Selection.values
+        |> Enum.map(fn {_, mf, tag, to, occ} -> Link.delete(%Link{
+          mod_from: mf, tag: tag, to: to, occurrences: occ}) end)
+      Master.delete(name)
+      Operation.delete(name)
+      :ok
+    end
   end
 end

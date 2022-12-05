@@ -3,8 +3,8 @@ defmodule PromptTest do
   import Markov.Prompt
 
   test "prompts" do
-    File.rm_rf("./test/model")
-    {:ok, model} = Markov.load("./test", "model", store_history: [])
+    Markov.nuke("model")
+    {:ok, model} = Markov.load("model", store_log: [])
 
     train_on_list(model, [
       "tell me a joke",
