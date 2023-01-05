@@ -6,7 +6,7 @@ defmodule Markov.Prompt do
 
   defp map_token(token) do
     token = Markov.TextUtil.sanitize_token(token)
-    type_to_score = %{noun: 50, verb: 30, adj: 25, adv: 10}
+    type_to_score = %{noun: 10, verb: 6, adj: 5, adv: 2}
 
     case :ets.lookup(Markov.Dictionary, token) do
       [] -> []
@@ -15,7 +15,7 @@ defmodule Markov.Prompt do
     end
   end
 
-  defp generate_tags(text), do:
+  defp generate_query(text), do:
     String.split(text) |> Enum.flat_map(&map_token/1) |> Enum.into(%{})
 
   @doc """
@@ -23,12 +23,12 @@ defmodule Markov.Prompt do
   instead of `Markov.train/3` with the current and last string
   """
   @spec train(model :: Markov.model_reference(), new_text :: String.t(),
-    last_text :: String.t() | nil)
+    last_text :: String.t() | nil, tags :: [term()])
     :: {:ok, :done | :deferred} | {:error, term()}
-  def train(model, new_text, last_text \\ nil) do
+  def train(model, new_text, last_text \\ nil, tags \\ []) do
     tags = if last_text do
-      generate_tags(last_text) |> Enum.map(fn {token, _score} -> token end)
-    else [] end
+      generate_query(last_text) |> Enum.map(fn {token, _score} -> token end)
+    else [] end ++ tags
 
     Markov.train(model, new_text, tags)
   end
@@ -55,9 +55,10 @@ defmodule Markov.Prompt do
   @doc """
   Generates the text from a prompt
   """
-  @spec generate_prompted(model :: Markov.model_reference(), prompt :: String.t()) :: {:ok, String.t()} | {:error, term()}
-  def generate_prompted(model, prompt) do
-    tags = generate_tags(prompt)
-    Markov.generate_text(model, tags)
+  @spec generate_prompted(model :: Markov.model_reference(), prompt :: String.t, query :: Markov.tag_query)
+    :: {:ok, String.t()} | {:error, term()}
+  def generate_prompted(model, prompt, query \\ %{}) do
+    query = generate_query(prompt) |> Map.merge(query)
+    Markov.generate_text(model, query)
   end
 end
