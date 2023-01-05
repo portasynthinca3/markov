@@ -24,7 +24,7 @@
   "nx": {:hex, :nx, "0.3.0", "12448769619ed1442e22bd198faf4629ae3d0ee3ed565e42be49829cc42bf35f", [:mix], [{:complex, "~> 0.4.2", [hex: :complex, repo: "hexpm", optional: false]}], "hexpm", "d08d8962f4379ade54281aad84c45cb7eb0118b406fc836f07b94acc40df5859"},
   "observer_cli": {:hex, :observer_cli, "1.7.3", "25d094d485f47239f218b53df0691a102fef13071dfd0d04922b5142297cfc93", [:mix, :rebar3], [{:recon, "~>2.5.1", [hex: :recon, repo: "hexpm", optional: false]}], "hexpm", "a41b6d3e11a3444e063e09cc225f7f3e631ce14019e5fbcaebfda89b1bd788ea"},
   "recon": {:hex, :recon, "2.5.2", "cba53fa8db83ad968c9a652e09c3ed7ddcc4da434f27c3eaa9ca47ffb2b1ff03", [:mix, :rebar3], [], "hexpm", "2c7523c8dee91dff41f6b3d63cba2bd49eb6d2fe5bf1eec0df7f87eb5e230e1c"},
-  "sidx": {:hex, :sidx, "0.1.3", "d3984f69b1ab84b224fe8e6306bf22addcf7de09b162698c17b25fb79f1f81a8", [:mix], [{:libring, "~> 1.6", [hex: :libring, repo: "hexpm", optional: false]}], "hexpm", "c6c5c998965f516f7b67acc64b802a9d73dbbadac6cce0e71448906ba110e32b"},
+  "sidx": {:hex, :sidx, "0.1.4", "1f5fe0899b17bea415c5a992465b6a8def9c87d6ec84d3113986039550b8ee7e", [:mix], [{:libring, "~> 1.6", [hex: :libring, repo: "hexpm", optional: false]}], "hexpm", "6d8734b9e065ee0f2ae7460a444b7b1b3ea40abbdbff6e5557414b9c67a70f3b"},
   "statistex": {:hex, :statistex, "1.0.0", "f3dc93f3c0c6c92e5f291704cf62b99b553253d7969e9a5fa713e5481cd858a5", [:mix], [], "hexpm", "ff9d8bee7035028ab4742ff52fc80a2aa35cece833cf5319009b52f1b5a86c27"},
   "xla": {:hex, :xla, "0.3.0", "7f40d3d799447bd745e6e61985c922821e355eca37c25754bac299d11f137f2e", [:make, :mix], [{:elixir_make, "~> 0.4", [hex: :elixir_make, repo: "hexpm", optional: false]}], "hexpm", "0de304f5624ea2f2ae1afdcbd72d33855364be36fed2cc5de8d6d2ec8950926e"},
 }
