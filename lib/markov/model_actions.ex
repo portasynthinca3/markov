@@ -30,26 +30,23 @@ defmodule Markov.ModelActions do
     order = state.options[:order]
     tokens = Enum.map(0..(order - 1), fn _ -> :start end) ++ tokens ++ [:end]
 
-    Markov.ListUtil.overlapping_stride(tokens, order + 1)
-      |> Flow.from_enumerable
-      |> Flow.map(fn bit ->
-        from = Enum.slice(bit, 0..-2)
-        to = Enum.at(bit, -1)
+    for bit <- Markov.ListUtil.overlapping_stride(tokens, order + 1) do
+      from = Enum.slice(bit, 0..-2)
+      to = Enum.at(bit, -1)
 
-        # sanitize tokens
-        from = if state.options[:sanitize_tokens] do
-          Enum.map(from, &Markov.TextUtil.sanitize_token/1)
-        else from end
+      # sanitize tokens
+      from = if state.options[:sanitize_tokens] do
+        Enum.map(from, &Markov.TextUtil.sanitize_token/1)
+      else from end
 
-        for tag <- tags do
-          keys = [from, tag, to]
-          case Sidx.select(state.main_table, keys) do
-            {:ok, []} -> Sidx.insert(state.main_table, keys, 1)
-            {:ok, [{[], val}]} -> Sidx.insert(state.main_table, keys, val + 1)
-          end
+      for tag <- tags do
+        keys = [from, tag, to]
+        case Sidx.select(state.main_table, keys) do
+          {:ok, []} -> Sidx.insert(state.main_table, keys, 1)
+          {:ok, [{[], val}]} -> Sidx.insert(state.main_table, keys, val + 1)
         end
-      end)
-      |> Flow.run
+      end
+    end
 
     :ok
   end

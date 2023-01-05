@@ -4,7 +4,7 @@ defmodule Markov.ModelServer do
   GenServer in charge of one model
   """
 
-  @main_table_options [keys: 3, compress: true, part_initial: 512, part_size: 10_000, part_timeout: 250, slot_size: 512]
+  @main_table_options [keys: 3, compress: true, part_initial: 512, part_size: 10_000, part_timeout: 250, slot_size: 1024]
   @log_entry_mapping %{start: 1, end: 2, train: 3, gen: 4}
   def log_entry_mapping, do: @log_entry_mapping
   def rev_log_entry_map, do: @log_entry_mapping |> Enum.map(fn {k, v} -> {v, k} end) |> Enum.into(%{})
@@ -60,7 +60,7 @@ defmodule Markov.ModelServer do
 
     # open tables
     main = Sidx.open!(Path.join(path, "main"), @main_table_options)
-    {:ok, history} = :file.open(Path.join(path, "history.log"), [:append, :binary, :raw, :sync])
+    {:ok, history} = :file.open(Path.join(path, "history.log"), [:append, :binary, :raw])
 
     state = %State{state | main_table: main, history_file: history, path: path}
     log(state, "loaded state and tables")
@@ -124,7 +124,6 @@ defmodule Markov.ModelServer do
   @spec write_log_entry(state :: State.t(), type :: Markov.log_entry_type(), data :: term()) :: :ok | :ignored | {:error, term()}
   defp write_log_entry(state, type, data) do
     if type in state.options[:store_log] do
-      log(state, "log: #{type} #{inspect data}")
       type = Map.get(@log_entry_mapping, type)
       ts = :erlang.system_time(:millisecond)
       data = :erlang.term_to_binary(data)

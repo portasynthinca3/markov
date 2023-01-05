@@ -11,3 +11,4 @@ markov-*.tar
 /test/model*/
 /dict.csv
 /model_*/
+/fprof.*

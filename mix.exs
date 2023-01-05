@@ -47,7 +47,8 @@ defmodule Markov.MixProject do
       {:sidx, "~> 0.1.2"},
       {:ex_doc, "~> 0.28", only: :dev, runtime: false},
       {:observer_cli, "~> 1.7", only: :dev, runtime: false},
-      {:credo, "~> 1.6", only: :dev, runtime: false}
+      {:credo, "~> 1.6", only: :dev, runtime: false},
+      {:benchee, "~> 1.1", only: :dev, runtime: false}
     ]
   end
 
