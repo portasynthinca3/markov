@@ -22,5 +22,6 @@
   "nx": {:hex, :nx, "0.3.0", "12448769619ed1442e22bd198faf4629ae3d0ee3ed565e42be49829cc42bf35f", [:mix], [{:complex, "~> 0.4.2", [hex: :complex, repo: "hexpm", optional: false]}], "hexpm", "d08d8962f4379ade54281aad84c45cb7eb0118b406fc836f07b94acc40df5859"},
   "observer_cli": {:hex, :observer_cli, "1.7.3", "25d094d485f47239f218b53df0691a102fef13071dfd0d04922b5142297cfc93", [:mix, :rebar3], [{:recon, "~>2.5.1", [hex: :recon, repo: "hexpm", optional: false]}], "hexpm", "a41b6d3e11a3444e063e09cc225f7f3e631ce14019e5fbcaebfda89b1bd788ea"},
   "recon": {:hex, :recon, "2.5.2", "cba53fa8db83ad968c9a652e09c3ed7ddcc4da434f27c3eaa9ca47ffb2b1ff03", [:mix, :rebar3], [], "hexpm", "2c7523c8dee91dff41f6b3d63cba2bd49eb6d2fe5bf1eec0df7f87eb5e230e1c"},
+  "sidx": {:hex, :sidx, "0.1.2", "f03a9b35c6f6da691f49aefea9672b683fc253980abf6faa345058922a5705d5", [:mix], [{:libring, "~> 1.6", [hex: :libring, repo: "hexpm", optional: false]}], "hexpm", "9f685a8b6b2de52a4e96521641a3598ca4e3e5c67b313ea10adb4ee7d449b497"},
   "xla": {:hex, :xla, "0.3.0", "7f40d3d799447bd745e6e61985c922821e355eca37c25754bac299d11f137f2e", [:make, :mix], [{:elixir_make, "~> 0.4", [hex: :elixir_make, repo: "hexpm", optional: false]}], "hexpm", "0de304f5624ea2f2ae1afdcbd72d33855364be36fed2cc5de8d6d2ec8950926e"},
 }

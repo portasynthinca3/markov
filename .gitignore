@@ -10,4 +10,4 @@ markov-*.tar
 /.elixir_ls/
 /test/model*/
 /dict.csv
-Mnesia.*
+/model_*/

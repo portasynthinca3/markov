@@ -19,24 +19,16 @@ Text generation library based on nth-order Markov chains
 In `mix.exs`:
 ```elixir
 defp deps do
-  [{:markov, "~> 3.0"}]
+  [{:markov, "~> 4.0"}]
 end
 ```
-Before using for the first time:
-```
-$ mix amnesia.create -d Markov.Database --disk
-```
 
-Unlike Markov 1.x, this version has very strong opinions on how you should create and persist your models (that differs from 2.x).
+Unlike Markov 1.x, this version has very strong opinions on how you should create and persist your models (that differs from 2.x and 3.x).
 
 Example workflow (click [here](https://hexdocs.pm/markov/api-reference.html) for full docs):
 ```elixir
-# The name can be an arbitrary term (not just a string).
-# It will be stored in a Mnesia DB and created from scratch using the specified
-# parameters if not found.
-# You should configure mnesia if you want to change its working dir, e.g.:
-# `config :mnesia, dir: "/var/data"`
-{:ok, model} = Markov.load("model_name", sanitize_tokens: true, store_log: [:train])
+# The model will be stored under this path
+{:ok, model} = Markov.load("./model_path", sanitize_tokens: true, store_log: [:train])
 
 # train using four strings
 :ok = Markov.train(model, "hello, world!")
@@ -56,7 +48,7 @@ Markov.unload(model)
 # Markov.train(model, "hello, world!")
 
 # load the model again
-{:ok, model} = Markov.load("/base/directory", "model_name")
+{:ok, model} = Markov.load("./model_path")
 
 # enable probability shifting and generate text
 :ok = Markov.configure(model, shift_probabilities: true)

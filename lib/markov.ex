@@ -91,17 +91,17 @@ defmodule Markov do
   specified options will be created and loaded, and if that fails, an error will
   be returned.
   """
-  @spec load(name :: term(), options :: [model_option()]) :: {:ok, model_reference()} | {:error, term()}
-  def load(name, create_options \\ []) do
+  @spec load(path :: String.t, options :: [model_option()]) :: {:ok, model_reference()} | {:error, term()}
+  def load(path, create_options \\ []) do
     # start process responsible for it
     result = Markov.ModelServer.start(
-      name: name,
+      path: path,
       create_opts: Keyword.merge(default_opts(), create_options)
     )
     case result do
       # refer to the server by name because it's supervised and automatically
       # restarted
-      {:ok, _pid} -> {:ok, {:via, Registry, {Markov.ModelServers, name}}}
+      {:ok, _pid} -> {:ok, {:via, Registry, {Markov.ModelServers, path}}}
       err -> err
     end
   end
@@ -156,18 +156,8 @@ defmodule Markov do
   end
 
   @typedoc """
-  If data was tagged when training, you can use tag queries to only select
-  generation paths that match a set of criteria
-
-    - `true` always matches
-    - `{x, :or, y}` matches when either `x` or `y` matches
-    - `{:not, x}` matches if x doesn't match, and vice versa
-    - `{x, :score, y}` is only allowed at the top level; the total score counter
-    (initially 0) is increased by `score` for every element `{query, score}` of
-    `y` (a list) that matches; probabilities are then adjusted according to those
-    scores.
-    - any other term is treated as a tag (note the `:"$none"` tag - the default
-    one)
+  If data was tagged when training, you can use tag queries to alter the
+  probabilities of certain generation paths
 
   ### Examples:
 
@@ -194,36 +184,15 @@ defmodule Markov do
       iex> Markov.generate_text(model)
       {:ok, "hello Elixir"}
 
-      # simple tag queries
-      iex> Markov.generate_text(model, {:subject_type, :planet})
-      {:ok, "hello earth"}
-      iex> Markov.generate_text(model, :lowercase)
-      {:ok, "hello earth"}
-      iex> Markov.generate_text(model, {:subject_type, :programming_language})
+      # "hello Elixir" has a score of 1 and "hello earth" has a score of zero;
+      # thus, "hello Elixir" has a probability of 2/3, and "hello earth" has
+      # that of 1/3
+      iex> Markov.generate_text(model, %{uppercase: 1})
       {:ok, "hello Elixir"}
-      iex> Markov.generate_text(model, :uppercase)
-      {:ok, "hello Elixir"}
-
-      # both possible generation paths were tagged with this tag
-      iex> Markov.generate_text(model, {:action, :saying_hello})
-      {:ok, "hello earth"}
-      iex> Markov.generate_text(model, {:action, :saying_hello})
-      {:ok, "hello Elixir"}
-
-      # both paths match, but "hello Elixir" has a score of 1 and "hello earth"
-      # has a score of zero; thus, "hello Elixir" has a probability of 2/3, and
-      # "hello earth" has that of 1/3
-      iex> Markov.generate_text(model, {true, :score, [:uppercase]})
-      {:ok, "hello Elixir"}
-      iex> Markov.generate_text(model, {true, :score, [:uppercase]})
+      iex> Markov.generate_text(model, %{uppercase: 1})
       {:ok, "hello earth"}
   """
-  @type tag_query() ::
-    true |
-    {tag_query(), :or, tag_query()} |
-    {tag_query(), :score, [{tag_query(), integer()}]} |
-    {:not, tag_query()} |
-    term()
+  @type tag_query() :: %{term() => non_neg_integer()}
 
   @doc """
   Predicts (generates) a list of tokens
@@ -234,7 +203,7 @@ defmodule Markov do
   See type `tag_query/0` for more info about `tag_query`
   """
   @spec generate_tokens(model_reference(), tag_query()) :: {:ok, [term()]} | {:error, term()}
-  def generate_tokens(model, tag_query \\ true) do
+  def generate_tokens(model, tag_query \\ %{}) do
     GenServer.call(model, {:generate, tag_query})
   end
 
@@ -248,7 +217,7 @@ defmodule Markov do
   See type `tag_query/0` for more info about `tags`
   """
   @spec generate_text(model_reference(), tag_query()) :: {:ok, binary()} | {:error, term()}
-  def generate_text(model, tag_query \\ true) do
+  def generate_text(model, tag_query \\ %{}) do
     case generate_tokens(model, tag_query) do
       {:ok, text} -> {:ok, Enum.join(text, " ")}
       {:error, _} = err -> err
@@ -266,32 +235,28 @@ defmodule Markov do
       iex> Markov.read_log(model)
       {:ok,
        [
-         %Operation{date_time: ~U[2022-10-02 16:59:51.844Z], type: :start, arg: nil},
-         %Operation{date_time: ~U[2022-10-02 16:59:56.705Z], type: :train, arg: ["hello", "world"]}
+         %Markov.Operation{date_time: ~U[2022-10-02 16:59:51.844Z], type: :start, arg: nil},
+         %Markov.Operation{date_time: ~U[2022-10-02 16:59:56.705Z], type: :train, arg: ["hello", "world"]}
        ]}
   """
-  @spec read_log(model_reference()) :: [Markov.Database.Operation.t()]
+  defmodule Operation, do: defstruct [:date_time, :type, :arg]
+  @spec read_log(model_reference()) :: [%Operation{}]
   def read_log(model) do
-    {:via, Registry, {Markov.ModelServers, name}} = model
-    Markov.Database.Operation.read!(name)
-      |> Enum.sort(& &1.ts <= &2.ts)
-      |> Enum.map(fn %Markov.Database.Operation{type: type, ts: ts, argument: arg} ->
-        %Operation{date_time: DateTime.from_unix!(ts, :millisecond), type: type, arg: arg}
-      end)
+    {:via, Registry, {Markov.ModelServers, path}} = model
+    {:ok, file} = :file.open(Path.join(path, "history.log"), [:read, :raw, :binary])
+    do_read_log(file) |> :lists.reverse
   end
 
-  @doc "Reads the model for debugging purposes"
-  @spec dump_model(model_reference()) :: [Markov.Database.Weight.t()]
-  def dump_model(model) do
-    {:via, Registry, {Markov.ModelServers, name}} = model
-    Markov.Database.Link.match!(mod_from: {name, :_}, tag: :_, to: :_)
-      |> Amnesia.Selection.values
-      |> Enum.map(fn link ->
-        Markov.Database.Weight.read!(link)
-      end)
+  defp do_read_log(file, acc \\ []) do
+    case :file.read(file, 11) do
+      {:ok, <<type::8, ts::64, len::16>>} ->
+        {:ok, data} = :file.read(file, len)
+        type = Map.get(Markov.ModelServer.rev_log_entry_map, type)
+        date_time = DateTime.from_unix!(ts, :millisecond)
+        data = :erlang.binary_to_term(data)
+        acc = [%Operation{date_time: date_time, type: type, arg: data} | acc]
+        do_read_log(file, acc)
+      _ -> acc
+    end
   end
-
-  @doc "Deletes model data forever. There's no going back!"
-  @spec nuke(name :: term()) :: :ok
-  defdelegate nuke(name), to: Markov.ModelActions
 end

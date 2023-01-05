@@ -7,9 +7,8 @@ defmodule Markov.Prompt do
   defp map_token(token) do
     token = Markov.TextUtil.sanitize_token(token)
     type_to_score = %{noun: 50, verb: 30, adj: 25, adv: 10}
-    result = :ets.lookup(Markov.Dictionary, token)
 
-    case result do
+    case :ets.lookup(Markov.Dictionary, token) do
       [] -> []
       [{_, :prep}] -> []
       [{_, type}] -> [{token, Map.get(type_to_score, type)}]
@@ -17,19 +16,19 @@ defmodule Markov.Prompt do
   end
 
   defp generate_tags(text), do:
-    String.split(text) |> Enum.flat_map(&map_token/1)
+    String.split(text) |> Enum.flat_map(&map_token/1) |> Enum.into(%{})
 
   @doc """
   Assuming your application receives a stream of strings, call this function
   instead of `Markov.train/3` with the current and last string
   """
   @spec train(model :: Markov.model_reference(), new_text :: String.t(),
-    last_text :: String.t() | nil, tags :: [any()])
+    last_text :: String.t() | nil)
     :: {:ok, :done | :deferred} | {:error, term()}
-  def train(model, new_text, last_text \\ nil, tags \\ []) do
+  def train(model, new_text, last_text \\ nil) do
     tags = if last_text do
       generate_tags(last_text) |> Enum.map(fn {token, _score} -> token end)
-    else [] end ++ tags
+    else [] end
 
     Markov.train(model, new_text, tags)
   end
@@ -56,10 +55,9 @@ defmodule Markov.Prompt do
   @doc """
   Generates the text from a prompt
   """
-  @spec generate_prompted(model :: Markov.model_reference(), prompt :: String.t(),
-    query :: Markov.tag_query()) :: {:ok, String.t()} | {:error, term()}
-  def generate_prompted(model, prompt, tag_query \\ true) do
+  @spec generate_prompted(model :: Markov.model_reference(), prompt :: String.t()) :: {:ok, String.t()} | {:error, term()}
+  def generate_prompted(model, prompt) do
     tags = generate_tags(prompt)
-    Markov.generate_text(model, {tag_query, :score, tags})
+    Markov.generate_text(model, tags)
   end
 end

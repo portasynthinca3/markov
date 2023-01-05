@@ -3,8 +3,8 @@ defmodule ShiftTest do
   import Markov
 
   test "prompts" do
-    Markov.nuke("model")
-    {:ok, model} = Markov.load("model", store_log: [], shift_probabilities: true)
+    File.rm_rf("model_test")
+    {:ok, model} = Markov.load("model_test", store_log: [], shift_probabilities: true)
 
     assert Markov.train(model, "hello world") == :ok
     assert Markov.train(model, "hello world") == :ok

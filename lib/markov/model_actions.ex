@@ -5,52 +5,25 @@ defmodule Markov.ModelActions do
   """
 
   alias Markov.ModelServer.State
-  use Amnesia
-  alias Markov.Database.{Link, Master, Operation, Weight}
   import Nx.Defn
   @nx_batch_size 1024
 
-  # WARNING: match specifications ahead
-
-  @doc "tag query to match specification"
-  @spec tq2ms({term(), [term()]}, Markov.tag_query()) :: :ets.match_spec()
-  def tq2ms(mf, query), do: [{
-    {Link, mf, :"$1", :"$2"},
-    [tq2msc(query)],
-    [{{:"$1", :"$2"}}]
-  }]
-
-  @doc "tag query to match spec condition"
-  @spec tq2msc(Markov.tag_query()) :: term()
-  def tq2msc(true), do: {:==, 1, 1}
-  def tq2msc({:not, x}), do: {:not, tq2msc(x)}
-  def tq2msc({x, :or, y}), do: {:orelse, tq2msc(x), tq2msc(y)}
-  def tq2msc({x, :score, _y}), do: tq2msc(x)
-  def tq2msc(tag), do: {:==, :"$1", {:const, tag}}
-
-  @doc "processes {_, :score, _} tag queries"
-  def process_scores(mf, rows, {_, :score, queries}) do
-    to_sets = for {query, score} <- queries do
-      ms = [{
-        {Link, mf, :"$1", :"$2"},
-        [tq2msc(query)],
-        [:"$2"]
-      }]
-      {Link.select(ms) |> Amnesia.Selection.values |> MapSet.new, score}
-    end
-
-    rows_tos = MapSet.new(for {to, _} <- rows, do: to)
-
-    Enum.reduce(to_sets, %{}, fn {set, score}, acc ->
-      MapSet.intersection(rows_tos, set)
-        |> Enum.reduce(acc, fn to, acc ->
-          previous = Map.get(acc, to, 0)
-          Map.put(acc, to, previous + score)
-        end)
-    end)
+  @doc "processes tag scores"
+  @spec process_scores([{term(), non_neg_integer(), term()}], Markov.tag_query) :: %{term() => non_neg_integer()}
+  def process_scores(rows, tag_scores) do
+    tag_set = Map.keys(tag_scores) |> MapSet.new # [:tag]
+    rows                                         # [{"hello", 1, :tag}, {"world", 1, :tag_two}]
+      |> Enum.group_by(fn {to, _, _} -> to end)  # %{"hello" => [{"hello", 1, :tag}], "world" => [{"world", 1, :tag_two}]}
+      |> Enum.map(fn {to, list} ->
+        {to, Enum.map(list, fn {_, tag, _} -> tag end) |> MapSet.new}
+      end)                                       # %{"hello" => MapSet.new([:tag]), "world" => MapSet.new([:tag_two])}
+      |> Enum.map(fn {to, tags} ->
+        considering = MapSet.intersection(tags, tag_set)
+        score = Enum.reduce(considering, 0,
+          fn tag, acc -> acc + Map.get(tag_scores, tag) end)
+        {to, score + 1}
+      end) |> Enum.into(%{})                     # %{"hello" => 1, "world" => 0}
   end
-
-  def process_scores(_, _, _), do: %{}
 
   @spec train(state :: State.t(), tokens :: [term()], tags :: [term()]) :: :ok
   def train(state, tokens, tags) do
@@ -68,11 +41,11 @@ defmodule Markov.ModelActions do
           Enum.map(from, &Markov.TextUtil.sanitize_token/1)
         else from end
 
-        mf = {state.name, from}
-        Amnesia.async do
-          for tag <- tags do
-            link = %Link{mod_from: mf, tag: tag, to: to} |> Link.write!
-            :mnesia.dirty_update_counter(Weight, link, 1)
+        for tag <- tags do
+          keys = [from, tag, to]
+          case Sidx.select(state.main_table, keys) do
+            {:ok, []} -> Sidx.insert(state.main_table, keys, 1)
+            {:ok, [{[], val}]} -> Sidx.insert(state.main_table, keys, val + 1)
           end
         end
       end)
@@ -107,27 +80,20 @@ defmodule Markov.ModelActions do
       Enum.map(current, &Markov.TextUtil.sanitize_token/1)
     else current end
 
-    mf = {state.name, current}
-    Amnesia.ets do
-      case Link.select(tq2ms(mf, tag_query)) |> Amnesia.Selection.values do
-        [] -> {:error, {:no_matches, current}, state}
-        rows ->
-          rows = rows |> Enum.map(fn {tag, to} ->
-            %Weight{value: frequency} = Weight.read(%Link{mod_from: mf, tag: tag, to: to})
-            {to, frequency}
-          end)
-          rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows
-          scores = process_scores(mf, rows, tag_query)
-          rows = rows |> Enum.map(fn {to, frequency} ->
-            score = Map.get(scores, to, 0) + 1
-            {to, frequency * score}
-          end)
-          sum = rows
-            |> Enum.map(fn {_, frequency} -> frequency end)
-            |> Enum.sum
-          result = probabilistic_select(:rand.uniform(sum) - 1, rows, sum)
-          {:ok, result, state}
-      end
+    case Sidx.select(state.main_table, [current]) do
+      {:ok, []} -> {:error, {:no_matches, current}, state}
+      {:ok, rows} ->
+        rows = rows |> Enum.map(fn {[to, tag], freq} -> {to, tag, freq} end)
+        rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows
+        scores = process_scores(rows, tag_query)
+        rows = rows |> Enum.map(fn {to, _, frequency} ->
+          {to, frequency * Map.get(scores, to)}
+        end)
+        sum = rows
+          |> Enum.map(fn {_, frequency} -> frequency end)
+          |> Enum.sum
+        result = probabilistic_select(:rand.uniform(sum) - 1, rows, sum)
+        {:ok, result, state}
     end
   end
 
@@ -148,26 +114,6 @@ defmodule Markov.ModelActions do
     first_prob = Nx.gather(param_tensor, Nx.tensor([[3]])) |> Nx.squeeze
     ratio      = Nx.gather(param_tensor, Nx.tensor([[4]])) |> Nx.squeeze
     len        = Nx.gather(param_tensor, Nx.tensor([[5]])) |> Nx.squeeze
-
-    # linear approximation
-    # result = cond do
-    #   i < peak ->
-    #     a = peak_prob / ratio
-    #     k = (peak_prob - a) / peak
-    #     k * i + a
-    #
-    #   i == peak -> peak_prob
-    #
-    #   i > peak ->
-    #     last = len - 1
-    #     peak_to_last = last - peak
-    #     k = -Nx.min((ratio - 1) / peak_to_last, peak_prob / peak_to_last)
-    #     a = -k + peak_prob
-    #     k * i + a
-    #
-    #   # hopefully never reached
-    #   true -> Nx.Constants.nan
-    # end
 
     power = Nx.tensor(1.7, type: :f32)
 
@@ -214,15 +160,15 @@ defmodule Markov.ModelActions do
     :: [{[term()], non_neg_integer()}]
   defp apply_shifting(rows) do
     # sort rows by their probability
-    rows = Enum.sort(rows, fn {_, foo}, {_, bar} -> foo > bar end)
+    rows = Enum.sort(rows, fn {_, _, foo}, {_, _, bar} -> foo > bar end)
 
     # choose the peak
     min_allowed = if length(rows) == 1, do: 0, else: 1
     peak = max(min_allowed, :math.sqrt(length(rows)) * 0.1) |> floor()
-    {_, peak_prob} = rows |> Enum.at(peak)
+    {_, _, peak_prob} = rows |> Enum.at(peak)
     # determine by how much the first most probable path is more likely than
     # the peak
-    {_, first_prob} = rows |> Enum.at(0)
+    {_, _, first_prob} = rows |> Enum.at(0)
     ratio = min(first_prob / peak_prob, 5)
 
     jitted = EXLA.jit(&Markov.ModelActions.adjust_batch_probs/1)
@@ -237,28 +183,8 @@ defmodule Markov.ModelActions do
           |> Nx.tensor(type: :f32)
           |> jitted.()
           |> Nx.to_flat_list
-        Enum.zip(batch, processed) |> Enum.map(fn {{{k, _}, _}, v} -> {k, v} end)
+        Enum.zip(batch, processed) |> Enum.map(fn {{{to, tag, _}, _}, fq} -> {to, tag, fq} end)
       end)
       |> Enum.into([])
-  end
-
-  @spec nuke(name :: term()) :: :ok
-  def nuke(name) do
-    # WARNING: matchspec ahead
-    Amnesia.async do
-      Link.select!([{
-        {Link, {name, :"$1"}, :"$2", :"$3"},
-        [],
-        [{{:"$1", :"$2", :"$3"}}]
-      }])
-        |> Amnesia.Selection.values
-        |> Enum.map(fn {from, tag, to} ->
-          Link.delete!({name, from})
-          Weight.delete!(%Link{mod_from: {name, from}, tag: tag, to: to})
-        end)
-      Master.delete!(name)
-      Operation.delete!(name)
-      :ok
-    end
   end
 end
