@@ -4,7 +4,7 @@
 Text generation library based on nth-order Markov chains
 
 ![Hex.pm](https://img.shields.io/hexpm/v/markov)
-![Hex.pm](https://img.shields.io/hexpm/dd/markov)
+![Hex.pm](https://img.shields.io/hexpm/dw/markov)
 
 ## Features
   - **Token sanitation** (optional): ignores letter case and punctuation when switching states, but still keeps the output as-is
