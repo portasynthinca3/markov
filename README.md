@@ -9,10 +9,10 @@ Text generation library based on nth-order Markov chains
 ## Features
   - **Token sanitation** (optional): ignores letter case and punctuation when switching states, but still keeps the output as-is
   - **Operation history** (optional): recalls the operations it was instructed to perform, incl. past training data
-  - **Probability shifting** (optional): gives less popular generation paths more chance to get used, which makes the output more original but may produce nonsense
-  - **Tagging** (optional): you can tag your source data to be queried later by aggregating those tags in any way you want, kind of like a database
-  - **Context awareness** (optional) grants your model the ability to answer questions given to it provided training data is good enough
-  - **Managed disk storage**
+  - **Probability shifting** (optional): gives less frequent generation paths more chance to get used, which makes the output more original but may produce nonsense
+  - **Tagging** (optional): you can tag your source data and alter the probabilities of tagged generation paths according to your rules
+  - **Prompted generation** (optional) grants your model the ability to answer questions given to it provided that the training data consists mostly of Q&A pairs
+  - **Managed disk storage** so you don't have to worry about storing and loading the models
   - **Transparent fragmentation** reduces RAM usage and loading times with huge models
 
 ## Usage
@@ -23,7 +23,7 @@ defp deps do
 end
 ```
 
-Unlike Markov 1.x, this version has very strong opinions on how you should create and persist your models (that differs from 2.x and 3.x).
+Unlike Markov 1.x, this version has very strong opinions on how you should create and persist your models (that also differs from 2.x and 3.x).
 
 Example workflow (click [here](https://hexdocs.pm/markov/api-reference.html) for full docs):
 ```elixir

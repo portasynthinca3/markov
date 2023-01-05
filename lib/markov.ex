@@ -2,18 +2,10 @@ defmodule Markov do
   @moduledoc """
   Public API
 
-  Before using for the first time:
-
-      $ mix amnesia.create -d Markov.Database --disk
-
   Example workflow:
 
-      # The name can be an arbitrary term (not just a string).
-      # It will be stored in a Mnesia DB and created from scratch using the specified
-      # parameters if not found.
-      # You should configure mnesia if you want to change its working dir, e.g.:
-      # `config :mnesia, dir: "/var/data"`
-      {:ok, model} = Markov.load("model_name", sanitize_tokens: true, store_log: [:train])
+      # The model will be stored under this path
+      {:ok, model} = Markov.load("./model_path", sanitize_tokens: true, store_log: [:train])
 
       # train using four strings
       :ok = Markov.train(model, "hello, world!")
@@ -33,7 +25,7 @@ defmodule Markov do
       # Markov.train(model, "hello, world!")
 
       # load the model again
-      {:ok, model} = Markov.load("/base/directory", "model_name")
+      {:ok, model} = Markov.load("./model_path")
 
       # enable probability shifting and generate text
       :ok = Markov.configure(model, shift_probabilities: true)
@@ -87,9 +79,9 @@ defmodule Markov do
   end
 
   @doc """
-  Loads an existing model named `name`. If none is found, a new model with the
-  specified options will be created and loaded, and if that fails, an error will
-  be returned.
+  Loads an existing model under path `path`. If none is found, a new model with
+  the specified options will be created and loaded, and if that fails, an error
+  will be returned.
   """
   @spec load(path :: String.t, options :: [model_option()]) :: {:ok, model_reference()} | {:error, term()}
   def load(path, create_options \\ []) do
@@ -107,7 +99,7 @@ defmodule Markov do
   end
 
   @doc """
-  Unloads an already loaded model
+  Unloads a loaded model
   """
   @spec unload(model :: model_reference()) :: :ok
   def unload(model) do
@@ -115,7 +107,7 @@ defmodule Markov do
   end
 
   @doc """
-  Reconfigures an already loaded model. See `model_option/0` for a thorough
+  Reconfigures a loaded model. See `model_option/0` for a thorough
   description of the options
   """
   @spec configure(model :: model_reference(), opts :: [model_option()]) :: :ok | {:error, term()}
@@ -124,7 +116,7 @@ defmodule Markov do
   end
 
   @doc """
-  Gets the configuration of an already loaded model
+  Gets the configuration of a loaded model
   """
   @spec get_config(model :: model_reference()) :: {:ok, [model_option()]} | {:error, term()}
   def get_config(model) do
@@ -142,7 +134,7 @@ defmodule Markov do
         :and, :can_be, :erlang.make_ref(), "<-- any term"
       ])
 
-  See `generate_text/2` for more info about `tags`
+  See `tag_query/0` for more info about `tags`
   """
   @spec train(model_reference(), String.t() | [term()], [term()]) :: :ok | {:error, term()}
   def train(model, text, tags \\ [:"$none"])
@@ -184,9 +176,13 @@ defmodule Markov do
       iex> Markov.generate_text(model)
       {:ok, "hello Elixir"}
 
-      # "hello Elixir" has a score of 1 and "hello earth" has a score of zero;
-      # thus, "hello Elixir" has a probability of 2/3, and "hello earth" has
+      # All generation paths have a score of 1 by default. Here we're telling
+      # Markov to add 1 point to paths tagged with `:uppercase`;
+      # "hello Elixir" now has a score of 2 and "hello earth" has a score of 1.
+      # Thus, "hello Elixir" has a probability of 2/3, and "hello earth" has
       # that of 1/3
+      iex> Markov.generate_text(model, %{uppercase: 1})
+      {:ok, "hello Elixir"}
       iex> Markov.generate_text(model, %{uppercase: 1})
       {:ok, "hello Elixir"}
       iex> Markov.generate_text(model, %{uppercase: 1})
@@ -195,7 +191,7 @@ defmodule Markov do
   @type tag_query() :: %{term() => non_neg_integer()}
 
   @doc """
-  Predicts (generates) a list of tokens
+  Generates a list of tokens
 
       iex> Markov.generate_tokens(model)
       {:ok, ["hello", "world"]}
@@ -208,8 +204,8 @@ defmodule Markov do
   end
 
   @doc """
-  Predicts (generates) a string. Will raise an exception if the model
-  was trained on non-textual tokens at least once
+  Generates a string. Will raise an exception if the model was trained on
+  non-textual tokens at least once
 
       iex> Markov.generate_text(model)
       {:ok, "hello world"}
