@@ -55,8 +55,7 @@ Markov.unload(model)
 {:ok, text} = Markov.generate_text(model)
 IO.puts(text)
 
-# print uninteresting stats
-model |> Markov.dump_partition(0) |> IO.inspect
+# print log
 model |> Markov.read_log |> IO.inspect
 
 # this will also write our new just-set option
