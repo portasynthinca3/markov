@@ -28,16 +28,24 @@ defmodule Markov.ModelActions do
   @spec train(state :: State.t(), tokens :: [term()], tags :: [term()]) :: :ok
   def train(state, tokens, tags) do
     order = state.options[:order]
-    tokens = Enum.map(0..(order - 1), fn _ -> :start end) ++ tokens ++ [:end]
+
+    tokens = if state.options[:type] == :hidden do
+      tokens = Enum.map(tokens, fn tok -> {tok, Markov.DictionaryHolder.get_type(tok)} end)
+      Enum.map(0..(order - 1), fn _ -> {:start, :start} end) ++ tokens ++ [{:end, :end}]
+    else
+      Enum.map(0..(order - 1), fn _ -> :start end) ++ tokens ++ [:end]
+    end
 
     for bit <- Markov.ListUtil.overlapping_stride(tokens, order + 1) do
       from = Enum.slice(bit, 0..-2)
       to = Enum.at(bit, -1)
 
-      # sanitize tokens
-      from = if state.options[:sanitize_tokens] do
-        Enum.map(from, &Markov.TextUtil.sanitize_token/1)
-      else from end
+      from = cond do
+        state.options[:sanitize_tokens] ->
+          Enum.map(from, &Markov.TextUtil.sanitize_token/1)
+        state.options[:type] == :hidden ->
+          Enum.map(from, fn {_, type} -> type end)
+      end
 
       for tag <- tags do
         keys = [from, tag, to]
@@ -64,9 +72,15 @@ defmodule Markov.ModelActions do
     case next_state(state, queue, tag_query) do
       _ when limit <= 0 -> {{:ok, acc}, state}
       {:ok, :end, state} -> {{:ok, acc}, state}
+      {:ok, {:end, :end}, state} -> {{:ok, acc}, state}
       {:error, err, state} -> {{:error, err}, state}
       {:ok, next, state} ->
-        walk_chain(state, acc ++ [next], Enum.slice(queue, 1..-1) ++ [next], limit - 1, tag_query)
+        {to_acc, to_q} = if state.options[:type] == :hidden do
+          next
+        else
+          {next, next}
+        end
+        walk_chain(state, acc ++ [to_acc], Enum.slice(queue, 1..-1) ++ [to_q], limit - 1, tag_query)
     end
   end
 
@@ -80,7 +94,7 @@ defmodule Markov.ModelActions do
     case Sidx.select(state.main_table, [current]) do
       {:ok, []} -> {:error, {:no_matches, current}, state}
       {:ok, rows} ->
-        rows = rows |> Enum.map(fn {[to, tag], freq} -> {to, tag, freq} end)
+        rows = rows |> IO.inspect |> Enum.map(fn {[to, tag], freq} -> {to, tag, freq} end)
         rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows
         scores = process_scores(rows, tag_query)
         rows = rows |> Enum.map(fn {to, _, frequency} ->

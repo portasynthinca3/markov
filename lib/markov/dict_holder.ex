@@ -21,4 +21,11 @@ defmodule Markov.DictionaryHolder do
 
     {:ok, nil}
   end
+
+  def get_type(token) do
+    case :ets.lookup(Markov.Dictionary, Markov.TextUtil.sanitize_token(token)) do
+      [] -> :unknown
+      [{_, type}] -> type
+    end
+  end
 end

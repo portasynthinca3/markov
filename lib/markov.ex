@@ -65,7 +65,8 @@ defmodule Markov do
     {:store_log, [log_entry_type()]} |
     {:shift_probabilities, boolean()} |
     {:sanitize_tokens, boolean()} |
-    {:order, integer()}
+    {:order, integer()} |
+    {:type, :normal | :hidden}
 
   @spec default_opts() :: [model_option()]
   defp default_opts do
@@ -73,7 +74,8 @@ defmodule Markov do
       store_log: [:start, :end, :train, :gen],
       shift_probabilities: false,
       sanitize_tokens: false,
-      order: 2
+      order: 2,
+      type: :normal
     ]
   end
 

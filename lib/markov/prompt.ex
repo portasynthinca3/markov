@@ -6,7 +6,13 @@ defmodule Markov.Prompt do
 
   defp map_token(token) do
     token = Markov.TextUtil.sanitize_token(token)
-    type_to_score = %{noun: 50, verb: 30, adj: 25, adv: 10}
+    type_to_score = %{
+      "n." => 50,
+      "v. t." => 30,
+      "v. i." => 30,
+      "adj." => 25,
+      "adv." => 10
+    }
 
     case :ets.lookup(Markov.Dictionary, token) do
       [] -> []

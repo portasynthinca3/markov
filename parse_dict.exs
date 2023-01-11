@@ -7,17 +7,23 @@ Mix.install([
   {:csv, "~> 3.0"}
 ])
 
+# type_map = %{
+#   "n."    => :noun,
+#   "a."    => :adj,
+#   "adv."  => :adv,
+#   "prep." => :prep,
+#   "v. t." => :verb_t,
+#   "v. i." => :verb_i,
+#   "pl."   => :pl
+# }
+
 dict = File.stream!("dict.csv", [read_ahead: 100_000], 1000)
   |> CSV.decode!()
   |> Stream.map(fn [word, type, _definition] -> {String.downcase(word), type} end)
-  |> Stream.filter(fn {_, type} -> type in ["n.", "a.", "adv.", "prep.", "v. t.", "v. i."] end)
-  |> Stream.map(fn {word, type} -> {word, Map.get(%{
-    "n."    => :noun,
-    "a."    => :adj,
-    "adv."  => :adv,
-    "prep." => :prep,
-    "v. t." => :verb,
-    "v. i." => :verb}, type)} end)
+  # |> Stream.filter(fn {_, type} -> type in Map.keys(type_map) end)
+  # |> Stream.map(fn {word, type} -> {word, Map.get(type_map, type)} end)
+  |> Stream.map(fn {word, type} -> {word, String.trim(type)} end)
+  |> Stream.map(fn {word, type} -> {word, :erlang.binary_to_atom(type)} end)
   |> Enum.into([])
 
 File.rm("priv/dict.dets")
