@@ -4,7 +4,8 @@ defmodule Markov do
 
   Example workflow:
 
-      # The model will be stored under this path
+      # the model will be stored under the specified path
+      # as it does not yet exist, it will be created using the specified options
       {:ok, model} = Markov.load("./model_path", sanitize_tokens: true, store_log: [:train])
 
       # train using four strings
@@ -20,9 +21,9 @@ defmodule Markov do
       # commit all changes and unload
       Markov.unload(model)
 
-      # these will return errors because the model is unloaded
-      # Markov.generate_text(model)
-      # Markov.train(model, "hello, world!")
+      # the model is unloaded
+      {:error, _} = Markov.generate_text(model)
+      {:error, _} = Markov.train(model, "hello, world!")
 
       # load the model again
       {:ok, model} = Markov.load("./model_path")
@@ -86,56 +87,90 @@ defmodule Markov do
   """
   @spec load(path :: String.t, options :: [model_option()]) :: {:ok, model_reference()} | {:error, term()}
   def load(path, create_options \\ []) do
-    # start process responsible for it
-    result = Markov.ModelServer.start(
-      path: path,
-      create_opts: Keyword.merge(default_opts(), create_options)
-    )
+    # start database
+    result = DynamicSupervisor.start_child(Markov.ModelSup, %{
+      id: path,
+      start: {CubDB, :start_link, [path, [name: {:via, Registry, {Markov.ModelServers, path}}]]},
+      restart: :transient
+    })
     case result do
-      # refer to the server by name because it's supervised and automatically
-      # restarted
-      {:ok, _pid} -> {:ok, {:via, Registry, {Markov.ModelServers, path}}}
+      {:ok, pid} ->
+        # save create options
+        CubDB.transaction(pid, fn tx ->
+          opts = CubDB.Tx.get(tx, :options)
+          tx = if opts, do: tx, else:
+            CubDB.Tx.put(tx, :options, Keyword.merge(default_opts(), create_options))
+          {:commit, tx, :ok}
+        end)
+        # refer to the server by name because it's supervised
+        {:ok, {:via, Registry, {Markov.ModelServers, path}}}
       err -> err
     end
   end
 
   @doc """
-  Unloads a loaded model
+  Unloads a loaded model.
   """
   @spec unload(model :: model_reference()) :: :ok
   def unload(model) do
-    GenServer.stop(model)
+    CubDB.stop(model)
   end
 
   @doc """
-  Reconfigures a loaded model. See `model_option/0` for a thorough
-  description of the options
+  Reconfigures a loaded model. The specified options are merged with the current
+  ones. See type `model_option/0` for a thorough description of the options.
   """
-  @spec configure(model :: model_reference(), opts :: [model_option()]) :: :ok | {:error, term()}
-  def configure(model, opts) do
-    GenServer.call(model, {:configure, opts})
+  @spec configure(model :: model_reference(), new_opts :: [model_option()]) :: :ok | {:error, term()}
+  def configure(model, new_opts) do
+    CubDB.transaction(model, fn tx ->
+      current_opts = CubDB.Tx.get(tx, :options)
+
+      # enforce constant options
+      cant_change = [:sanitize_tokens, :order]
+      statuses = for option <- cant_change do
+        if current_opts[option] != new_opts[option] and new_opts[option] do
+          {:error, {:cant_change, option}}
+        else
+          :ok
+        end
+      end
+
+      # report first error or apply options
+      first_error = Enum.find(statuses, & &1 != :ok)
+      case first_error do
+        nil ->
+          tx = CubDB.Tx.put(tx, :options, Keyword.merge(current_opts, new_opts))
+          {:commit, tx, :ok}
+        err ->
+          {:cancel, err}
+      end
+    end)
   end
 
   @doc """
   Gets the configuration of a loaded model
   """
-  @spec get_config(model :: model_reference()) :: {:ok, [model_option()]} | {:error, term()}
+  @spec get_config(model :: model_reference()) :: [model_option()]
   def get_config(model) do
-    GenServer.call(model, :get_config)
+    CubDB.get(model, :options)
   end
 
   @doc """
   Trains `model` using text or a list of tokens.
 
       :ok = Markov.train(model, "Hello, world!")
-      :ok = Markov.train(model, "this is a string that's broken down into tokens behind the scenes")
+      :ok = Markov.train(model, "each word in a string is a token")
       :ok = Markov.train(model, [
         :this, "is", 'a token', :list, "where",
         {:each_element, :is, {:taken, :as_is}},
         :and, :can_be, :erlang.make_ref(), "<-- any term"
       ])
+      :ok = Markov.train(model, 'a charlist is a list, therefore every character is its own token')
 
-  See `tag_query/0` for more info about `tags`
+  See `tag_query/0` for more info about `tags`.
+
+  **Note:** do not use the tokens `:"$_start"` and `:"$_end"` as they are used
+  internally
   """
   @spec train(model_reference(), String.t() | [term()], [term()]) :: :ok | {:error, term()}
   def train(model, text, tags \\ [:"$none"])
@@ -145,7 +180,7 @@ defmodule Markov do
   end
   def train(model, tokens, tags) when is_list(tokens) do
     tags = if tags == [], do: [:"$none"], else: tags
-    GenServer.call(model, {:train, tokens, tags})
+    Markov.ModelActions.train(model, tokens, tags)
   end
 
   @typedoc """
@@ -156,7 +191,8 @@ defmodule Markov do
 
       # training
       iex> Markov.train(model, "hello earth", [
-        {:action, :saying_hello}, # <- terms of any type can function as tags
+        {:action, :saying_hello}, # <- a tag can either be an atom or a tuple,
+                                  #    however tuples can contain any data types
         {:subject_type, :planet},
         {:subject, "earth"},
         :lowercase
@@ -188,8 +224,11 @@ defmodule Markov do
       {:ok, "hello Elixir"}
       iex> Markov.generate_text(model, %{uppercase: 1})
       {:ok, "hello earth"}
+
+  **Note:** tags must be either atoms or tuples, however tuples can contain any
+  data types.
   """
-  @type tag_query() :: %{term() => non_neg_integer()}
+  @type tag_query() :: %{(atom() | tuple()) => non_neg_integer()}
 
   @doc """
   Generates a list of tokens
@@ -201,7 +240,7 @@ defmodule Markov do
   """
   @spec generate_tokens(model_reference(), tag_query()) :: {:ok, [term()]} | {:error, term()}
   def generate_tokens(model, tag_query \\ %{}) do
-    GenServer.call(model, {:generate, tag_query})
+    Markov.ModelActions.generate(model, tag_query)
   end
 
   @doc """
@@ -218,42 +257,6 @@ defmodule Markov do
     case generate_tokens(model, tag_query) do
       {:ok, text} -> {:ok, Enum.join(text, " ")}
       {:error, _} = err -> err
-    end
-  end
-
-  defmodule Operation do
-    defstruct [:date_time, :type, :arg]
-    @type t() :: %__MODULE__{date_time: DateTime.t(), type: Markov.log_entry_type(), arg: term()}
-  end
-
-  @doc """
-  Reads the log file and returns a list of entries in chronological order
-
-      iex> Markov.read_log(model)
-      {:ok,
-       [
-         %Markov.Operation{date_time: ~U[2022-10-02 16:59:51.844Z], type: :start, arg: nil},
-         %Markov.Operation{date_time: ~U[2022-10-02 16:59:56.705Z], type: :train, arg: ["hello", "world"]}
-       ]}
-  """
-  defmodule Operation, do: defstruct [:date_time, :type, :arg]
-  @spec read_log(model_reference()) :: [%Operation{}]
-  def read_log(model) do
-    {:via, Registry, {Markov.ModelServers, path}} = model
-    {:ok, file} = :file.open(Path.join(path, "history.log"), [:read, :raw, :binary])
-    do_read_log(file) |> :lists.reverse
-  end
-
-  defp do_read_log(file, acc \\ []) do
-    case :file.read(file, 11) do
-      {:ok, <<type::8, ts::64, len::16>>} ->
-        {:ok, data} = :file.read(file, len)
-        type = Map.get(Markov.ModelServer.rev_log_entry_map, type)
-        date_time = DateTime.from_unix!(ts, :millisecond)
-        data = :erlang.binary_to_term(data)
-        acc = [%Operation{date_time: date_time, type: type, arg: data} | acc]
-        do_read_log(file, acc)
-      _ -> acc
     end
   end
 end

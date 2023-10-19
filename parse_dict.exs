@@ -23,7 +23,6 @@ dict = File.stream!("dict.csv", [read_ahead: 100_000], 1000)
   # |> Stream.filter(fn {_, type} -> type in Map.keys(type_map) end)
   # |> Stream.map(fn {word, type} -> {word, Map.get(type_map, type)} end)
   |> Stream.map(fn {word, type} -> {word, String.trim(type)} end)
-  |> Stream.map(fn {word, type} -> {word, :erlang.binary_to_atom(type)} end)
   |> Enum.into([])
 
 File.rm("priv/dict.dets")

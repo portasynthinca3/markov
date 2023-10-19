@@ -4,7 +4,7 @@ defmodule Markov.MixProject do
   def project do
     [
       app: :markov,
-      version: "4.2.0",
+      version: "5.0.0",
       elixir: "~> 1.12",
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
@@ -18,9 +18,9 @@ defmodule Markov.MixProject do
         assets: "doc_assets"
       ],
       test_coverage: [ignore_modules: [
-        Markov.ModelServer.State,
-        Markov.Sup,
-        Markov.PartTimeout
+        Markov.App,           # OTP app
+        Markov.Sup,           # OTP supervisor
+        Markov.Log.Operation, # a struct
       ]],
       aliases: ["test.ci": ["test --color --max-cases 10"]]
     ]
@@ -43,10 +43,10 @@ defmodule Markov.MixProject do
     [
       {:nx, "~> 0.3"},
       {:exla, "~> 0.3"},
-      {:sidx, "~> 0.1.5"},
-      {:ex_doc, "~> 0.28", only: :dev, runtime: false},
+      {:cubdb, "~> 2.0"},
+      {:ex_doc, "~> 0.30", only: :dev, runtime: false},
       {:observer_cli, "~> 1.7", only: :dev, runtime: false},
-      {:credo, "~> 1.6", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: :dev, runtime: false},
       {:benchee, "~> 1.1", only: :dev, runtime: false}
     ]
   end

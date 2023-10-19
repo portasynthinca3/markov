@@ -16,8 +16,11 @@ defmodule Markov.Prompt do
 
     case :ets.lookup(Markov.Dictionary, token) do
       [] -> []
-      [{_, :prep}] -> []
-      [{_, type}] -> [{token, Map.get(type_to_score, type)}]
+                       # wrap token in a tuple because Markov can't accept strings
+      [{_, type}] -> case Map.get(type_to_score, type) do
+        nil -> []
+        score -> [{{token}, score}]
+      end
     end
   end
 
@@ -30,8 +33,8 @@ defmodule Markov.Prompt do
   """
   @spec train(model :: Markov.model_reference(), new_text :: String.t(),
     last_text :: String.t() | nil, tags :: [term()])
-    :: {:ok, :done | :deferred} | {:error, term()}
-  def train(model, new_text, last_text \\ nil, tags \\ []) do
+    :: :ok | {:error, term()}
+  def train(model, new_text, last_text \\ nil, tags \\ [:"$none"]) do
     tags = if last_text do
       generate_query(last_text) |> Enum.map(fn {token, _score} -> token end)
     else [] end ++ tags

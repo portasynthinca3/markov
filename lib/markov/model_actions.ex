@@ -1,115 +1,182 @@
 defmodule Markov.ModelActions do
   @moduledoc """
   Performs training, generation and probability shifting. Supposed to only ever
-  be used by `Markov.ModelServer`s.
+  be directly invoked by the `Markov` API frontend.
   """
 
-  alias Markov.ModelServer.State
   import Nx.Defn
   @nx_batch_size 1024
 
-  @doc "processes tag scores"
-  @spec process_scores([{term(), non_neg_integer(), term()}], Markov.tag_query) :: %{term() => non_neg_integer()}
+  @spec process_scores(rows :: [{to :: term(), tag :: term(), freq :: non_neg_integer()}], tag_scores: Markov.tag_query)
+    :: %{to :: term() => score :: non_neg_integer()}
   def process_scores(rows, tag_scores) do
-    tag_set = Map.keys(tag_scores) |> MapSet.new # [:tag]
-    rows                                         # [{"hello", 1, :tag}, {"world", 1, :tag_two}]
-      |> Enum.group_by(fn {to, _, _} -> to end)  # %{"hello" => [{"hello", 1, :tag}], "world" => [{"world", 1, :tag_two}]}
+    # get a set of tags
+    tag_set = Map.keys(tag_scores) |> MapSet.new
+    rows
+      # create a map of target tokens to rows
+      # example:
+      #   [{"hello", :tag, 1}, {"world", :tag_two, 1}] ->
+      #   %{"hello" => [{"hello", :tag, 1}], "world" => [{"world", :tag_two, 1}]}
+      |> Enum.group_by(fn {to, _, _} -> to end)
+      # convert rows in map values to tag sets
+      # example:
+      #   %{"hello" => [{"hello", :tag, 1}], "world" => [{"world", :tag_two, 1}]} ->
+      #   %{"hello" => MapSet.new([:tag]), "world" => MapSet.new([:tag_two])}
       |> Enum.map(fn {to, list} ->
         {to, Enum.map(list, fn {_, tag, _} -> tag end) |> MapSet.new}
-      end)                                       # %{"hello" => MapSet.new([:tag]), "world" => MapSet.new([:tag_two])}
+      end)
+      # calculate the score sum for map entries
+      # example:
+      #   %{"hello" => MapSet.new([:tag]), "world" => MapSet.new([:tag_two])} ->
+      #   %{"hello" => 2, "world" => 1}
       |> Enum.map(fn {to, tags} ->
         considering = MapSet.intersection(tags, tag_set)
-        score = Enum.reduce(considering, 0,
+        score = Enum.reduce(considering, 1,
           fn tag, acc -> acc + Map.get(tag_scores, tag) end)
-        {to, score + 1}
-      end) |> Enum.into(%{})                     # %{"hello" => 1, "world" => 0}
+        {to, score}
+      end) |> Enum.into(%{})
   end
 
-  @spec train(state :: State.t(), tokens :: [term()], tags :: [term()]) :: :ok
-  def train(state, tokens, tags) do
-    order = state.options[:order]
+  @spec train(model :: Markov.model_reference, tokens :: [term()], tags :: [term()])
+    :: :ok
+  def train(model, tokens, tags) do
+    options = CubDB.get(model, :options)
+    order = options[:order]
 
-    tokens = if state.options[:type] == :hidden do
+    # append `order` `:start` tokens and one `:"$_end"` token
+    # example for order=2:
+    #   ["Hello,", "World!"] ->
+    #   [:"$_start", :"$_start", "Hello,", "World!", :"$_end"]
+    tokens = if options[:type] == :hidden do
       tokens = Enum.map(tokens, fn tok -> {tok, Markov.DictionaryHolder.get_type(tok)} end)
-      Enum.map(0..(order - 1), fn _ -> {:start, :start} end) ++ tokens ++ [{:end, :end}]
+      Enum.map(0..(order - 1), fn _ -> {:"$_start", :"$_start"} end) ++ tokens ++ [{:"$_end", :"$_end"}]
     else
-      Enum.map(0..(order - 1), fn _ -> :start end) ++ tokens ++ [:end]
+      Enum.map(0..(order - 1), fn _ -> :"$_start" end) ++ tokens ++ [:"$_end"]
     end
 
-    for bit <- Markov.ListUtil.overlapping_stride(tokens, order + 1) do
-      from = Enum.slice(bit, 0..-2)
-      to = Enum.at(bit, -1)
+    CubDB.transaction(model, fn tx ->
+      # obtain lists of `order + 1' tokens
+      # example for order=2:
+      #   [:"$_start", :"$_start", "Hello,", "World!", :"$_end"] ->
+      #   [
+      #     [:"$_start", :"$_start", "Hello,"],
+      #     [:"$_start", "Hello,", "World!"],
+      #     ["Hello,", "World!", :"$_end"]
+      #   ]
+      tx = Enum.reduce(Markov.ListUtil.overlapping_stride(tokens, order + 1), tx, fn bit, tx ->
+        # all tokens except the last one tell what state a connection must be made from;
+        # the last token tells what state that connection should be made to
+        # example:
+        #   [:"$_start", :"$_start", "Hello,"] ->
+        #   from = [:"$_start", :"$_start"]
+        #   to = "Hello,"
+        from = Enum.slice(bit, 0..-2)
+        to = Enum.at(bit, -1)
 
-      from = cond do
-        state.options[:sanitize_tokens] ->
-          Enum.map(from, &Markov.TextUtil.sanitize_token/1)
-        state.options[:type] == :hidden ->
-          Enum.map(from, fn {_, type} -> type end)
-      end
+        # the generator will succeedingly update its state based on the
+        # connections we save here. for example, if it takes the connection from
+        # the example above, it will transform its state like this:
+        #   [:"$_start", :"$_start"] ->
+        #   [:"$_start", "Hello,"]
+        # and will then seek a connection based on this new state on the next step
 
-      for tag <- tags do
-        keys = [from, tag, to]
-        case Sidx.select(state.main_table, keys) do
-          {:ok, []} -> Sidx.insert(state.main_table, keys, 1)
-          {:ok, [{[], val}]} -> Sidx.insert(state.main_table, keys, val + 1)
+        # sanitize tokens
+        from = cond do
+          options[:sanitize_tokens] ->
+            Enum.map(from, &Markov.TextUtil.sanitize_token/1)
+          options[:type] == :hidden ->
+            Enum.map(from, fn {_, type} -> type end)
+          true ->
+            from
         end
-      end
-    end
 
-    :ok
+        # save connections
+        Enum.reduce(tags, tx, fn tag, tx ->
+          freq = CubDB.Tx.get(tx, {from, tag, to}, 0) + 1
+          CubDB.Tx.put(tx, {from, tag, to}, freq)
+        end)
+      end)
+
+      {:commit, tx, :ok}
+    end)
   end
 
-  @spec generate(State.t(), Markov.tag_query()) :: {{:ok, [term()]} | {:error, term()}, State.t()}
-  def generate(state, tag_query) do
-    order = state.options[:order]
-    initial_queue = Enum.map(0..(order - 1), fn _ -> :start end)
-    walk_chain(state, [], initial_queue, 100, tag_query)
+  @spec generate(model :: Markov.model_reference, tag_query :: Markov.tag_query)
+    :: {:ok, [term()]} | {:error, term()}
+  def generate(model, tag_query) do
+    options = CubDB.get(model, :options)
+    order = options[:order]
+    initial_state = Enum.map(0..(order - 1), fn _ -> :"$_start" end)
+    CubDB.with_snapshot(model, fn snap ->
+      walk_chain(snap, [], initial_state, 100, tag_query)
+    end)
   end
 
-  @spec walk_chain(State.t(), [term()], [term()], non_neg_integer(), Markov.tag_query())
-    :: {{:ok, [term()]} | {:error, term()}, State.t()}
-  def walk_chain(state, acc, queue, limit, tag_query) do
-    case next_state(state, queue, tag_query) do
-      _ when limit <= 0 -> {{:ok, acc}, state}
-      {:ok, :end, state} -> {{:ok, acc}, state}
-      {:ok, {:end, :end}, state} -> {{:ok, acc}, state}
-      {:error, err, state} -> {{:error, err}, state}
-      {:ok, next, state} ->
-        {to_acc, to_q} = if state.options[:type] == :hidden do
+  @spec walk_chain(snap :: CubDB.Snapshot.t, acc :: [term()], state :: [term()], limit :: non_neg_integer(), tag_query :: Markov.tag_query)
+    :: {:ok, [term()]} | {:error, term()}
+  def walk_chain(snap, acc, state, limit, tag_query) do
+    options = CubDB.Snapshot.get(snap, :options)
+    case next_token(snap, state, tag_query) do
+      # limit reached
+      _ when limit <= 0 -> {:ok, acc}
+      # end conditions
+      {:ok, :"$_end"} -> {:ok, acc}
+      {:ok, {:"$_end", :"$_end"}} -> {:ok, acc}
+      # error condition
+      {:error, err} -> {:error, err}
+      # next token
+      {:ok, next} ->
+        # in the case of hidden chains, two different tokens will be added to
+        # the accumulator and the state
+        {to_acc, to_state} = if options[:type] == :hidden do
           next
         else
           {next, next}
         end
-        walk_chain(state, acc ++ [to_acc], Enum.slice(queue, 1..-1) ++ [to_q], limit - 1, tag_query)
+        # recurse
+        acc = acc ++ [to_acc]
+        state = Enum.slice(state, 1..-1) ++ [to_state]
+        walk_chain(snap, acc, state, limit - 1, tag_query)
     end
   end
 
-  @spec next_state(State.t(), [term()], Markov.tag_query())
-    :: {:ok, term(), State.t()} | {:error, term(), State.t()}
-  def next_state(state, current, tag_query) do
-    current = if state.options[:sanitize_tokens] do
-      Enum.map(current, &Markov.TextUtil.sanitize_token/1)
-    else current end
+  @spec next_token(snap :: CubDB.Snapshot.t, state :: [term()], tag_query :: Markov.tag_query)
+    :: {:ok, term()} | {:error, term()}
+  def next_token(snap, state, tag_query) do
+    options = CubDB.Snapshot.get(snap, :options)
 
-    case Sidx.select(state.main_table, [current]) do
-      {:ok, []} -> {:error, {:no_matches, current}, state}
-      {:ok, rows} ->
-        rows = rows |> IO.inspect |> Enum.map(fn {[to, tag], freq} -> {to, tag, freq} end)
-        rows = if state.options[:shift_probabilities], do: apply_shifting(rows), else: rows
-        scores = process_scores(rows, tag_query)
-        rows = rows |> Enum.map(fn {to, _, frequency} ->
-          {to, frequency * Map.get(scores, to)}
-        end)
-        sum = rows
-          |> Enum.map(fn {_, frequency} -> frequency end)
-          |> Enum.sum
+    # sanitize tokens
+    state = if options[:sanitize_tokens] do
+      Enum.map(state, &Markov.TextUtil.sanitize_token/1)
+    else state end
+
+    # because tags can either be atoms or tuples,
+    # by setting min_key to {state, 0, 0} and max_key to {state, "", 0} we
+    # can match the pattern {state, _, _} because of the comparison order:
+    # int < atom < tuple < bitstring
+    rows = CubDB.Snapshot.select(snap, min_key: {state, 0, 0}, max_key: {state, "", 0})
+      |> Stream.map(fn {{^state, tag, to}, freq} -> {to, tag, freq} end)
+      |> Enum.into([])
+      |> apply_shifting(options[:shift_probabilities])
+
+    # multiply frequencies by scores
+    scores = process_scores(rows, tag_query)
+    rows = rows |> Enum.map(fn {to, _, frequency} ->
+      {to, frequency * Map.get(scores, to)}
+    end)
+
+    case length(rows) do
+      0 -> {:error, {:no_connections, state}}
+      _ ->
+        # select a random row accounting for probabilities
+        sum = rows |> Enum.map(fn {_, freq} -> freq end) |> Enum.sum
         result = probabilistic_select(:rand.uniform(sum) - 1, rows, sum)
-        {:ok, result, state}
+        {:ok, result}
     end
   end
 
   @spec probabilistic_select(integer(), list({any(), integer()}), integer(), integer()) :: any()
-  defp probabilistic_select(number, [{name, add} | tail] = _choices, sum, acc \\ 0) do
+  defp probabilistic_select(number, _choices = [{name, add} | tail], sum, acc \\ 0) do
     if (number >= acc) and (number < acc + add) do
       name
     else
@@ -141,7 +208,7 @@ defmodule Markov.ModelActions do
         coeff = peak_prob / ((len - peak) ** (1 / ratio))
         coeff * ((-i + len - 1) ** (1 / ratio))
 
-      # hopefully never reached
+      # never reached
       true -> Nx.Constants.nan
     end
 
@@ -167,9 +234,10 @@ defmodule Markov.ModelActions do
     results
   end
 
-  @spec apply_shifting([{[term()], non_neg_integer()}])
-    :: [{[term()], non_neg_integer()}]
-  defp apply_shifting(rows) do
+  @spec apply_shifting([{from :: [term()], tag :: atom() | tuple(), freq :: non_neg_integer()}], do_apply :: boolean())
+    :: [{from :: [term()], tag :: atom() | tuple(), freq :: non_neg_integer()}]
+  def apply_shifting(rows, _do_apply = false), do: rows
+  def apply_shifting(rows, _do_apply = true) do
     # sort rows by their probability
     rows = Enum.sort(rows, fn {_, _, foo}, {_, _, bar} -> foo > bar end)
 
